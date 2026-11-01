@@ -23,6 +23,10 @@ pyyaml = ">=6.0,<7.0"
 [tool.poetry.group.training.dependencies]
 pandas = ">=2.2,<3.0"
 
+# Busca de hiperparâmetros — etapa offline, fora das imagens Docker.
+[tool.poetry.group.tuning.dependencies]
+optuna = ">=4.0,<6.0"
+
 # Serviço de inferência — instalado apenas na imagem da API.
 [tool.poetry.group.api.dependencies]
 fastapi = ">=0.115,<1.0"

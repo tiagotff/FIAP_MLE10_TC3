@@ -22,8 +22,11 @@ class Settings(BaseSettings):
     models_dir: Path = Path("models")
     model_filename: str = "model.joblib"
     metadata_filename: str = "metadata.json"
+    reports_dir: Path = Path("reports")
     data_config_path: Path = Path("configs/data.yaml")
     model_config_path: Path = Path("configs/model.yaml")
+    training_config_path: Path = Path("configs/training.yaml")
+    tuning_config_path: Path = Path("configs/tuning.yaml")
     random_seed: int = Field(default=42, ge=0)
     inference_backend: str = "sklearn"
     log_level: str = "INFO"
