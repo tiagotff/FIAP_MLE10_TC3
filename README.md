@@ -5,8 +5,125 @@ servido por uma API REST (FastAPI) empacotada em Docker. O projeto cobre o ciclo
 vida do modelo em produção: decisão arquitetural de deploy em nuvem, CI/CD, orquestração
 de retreino, monitoramento e otimização de latência.
 
+## Quickstart
+
+Sequência única, do zero, para quem acabou de clonar o repositório. Cada comando assume
+que você está na pasta raiz do projeto e usa **Git Bash** (Linux/macOS: mesmos
+comandos). Há dois caminhos independentes: **local com Poetry** ou **somente Docker**.
+
+> Pré-requisitos: Python 3.11 ou 3.12, [Poetry](https://python-poetry.org/) 2.x e
+> Docker. Para o caminho só com Docker, basta o Docker.
+
+### Opção A — Local (Poetry)
+
+Você vai precisar de **2 terminais abertos ao mesmo tempo**: um para a API e outro para
+enviar requisições.
+
+**Terminal 1** — do clone até a API rodando:
+
+```bash
+# 1. Clonar e entrar na pasta
+git clone https://github.com/tiagotff/FIAP_MLE10_TC3.git
+cd FIAP_MLE10_TC3
+
+# 2. Criar o ambiente virtual (Python 3.12) e instalar as dependências
+poetry config virtualenvs.in-project true
+poetry env use 3.12
+poetry install
+
+# 3. Copiar o template de variáveis de ambiente
+cp .env.example .env
+
+# 4. Conferir a qualidade do código e rodar os testes
+poetry run ruff check .
+poetry run pytest
+
+# 5. Baixar o corpus (commit fixado + verificação SHA-256)
+poetry run python -m triage.data.download
+
+# 6. Treinar: deduplicação, divisão 70/15/15, limiar calibrado e avaliação no teste
+poetry run python -m triage.training.train
+
+# 7. Subir a API — deixe este terminal aberto e rodando
+poetry run uvicorn triage.api.main:app --port 8000
+```
+
+Espere aparecer `Application startup complete` antes de seguir. **Não digite mais nada
+neste terminal**: ele precisa continuar rodando. A documentação interativa fica em
+<http://localhost:8000/docs>.
+
+**Terminal 2** — novo terminal, com a API do Terminal 1 ainda rodando:
+
+```bash
+# 1. Entrar na pasta
+cd FIAP_MLE10_TC3
+
+# 2. Verificar se o serviço está pronto e ver o modelo carregado
+curl http://localhost:8000/ready
+curl http://localhost:8000/model
+
+# 3. Classificar um laudo
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Patient admitted with acute chest pain radiating to the left arm, ST-segment elevation and elevated troponin levels."}'
+
+# 4. Classificar um lote de laudos
+curl -X POST http://localhost:8000/predict/batch \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["acute ischemic stroke with hemiparesis", "gastric ulcer endoscopy follow up"]}'
+
+# 5. Medir a latência (1.000 requisições)
+poetry run python scripts/benchmark_api.py --requests 1000 --warmup 100
+```
+
+Para encerrar, volte ao Terminal 1 e aperte `Ctrl+C`.
+
+Opcional: `poetry run python -m triage.training.tune` refaz a busca de hiperparâmetros
+com o Optuna (~2 min) e regrava `configs/model.yaml`.
+
+### Opção B — Somente Docker
+
+A imagem baixa os dados e treina o modelo durante o build, então não é preciso Python
+nem Poetry na máquina:
+
+```bash
+# 1. Clonar e entrar na pasta
+git clone https://github.com/tiagotff/FIAP_MLE10_TC3.git
+cd FIAP_MLE10_TC3
+
+# 2. Construir a imagem (treina o modelo; leva alguns minutos)
+docker build -t triage-api:latest .
+
+# 3. Subir o container
+docker run -d --name triage-api -p 8000:8000 triage-api:latest
+
+# 4. Testar
+curl http://localhost:8000/ready
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Patient admitted with acute chest pain radiating to the left arm, ST-segment elevation and elevated troponin levels."}'
+
+# 5. Conferir a saúde do container (o healthcheck roda a cada 30 s)
+sleep 35
+docker ps
+
+# 6. Encerrar
+docker rm -f triage-api
+```
+
+Resultado esperado em ambos os caminhos: `"label":"urgente"` no `/predict` e, no treino,
+`[teste/decision_policy] acurácia=0.8040 f1_macro=0.7763 recall_urgente=0.8466`.
+
+> ⚠️ **Windows:** se `poetry env use 3.12` falhar, aponte o executável diretamente:
+> `poetry env use "$(py -3.12 -c 'import sys; print(sys.executable)')"`. Se o `poetry`
+> apresentar erros de importação ao rodar qualquer comando, reinstale-o com
+> `pipx uninstall poetry && pipx install poetry`.
+
+---
+
 ## Sumário
 
+- [Quickstart](#quickstart)
 - [Contexto do problema](#contexto-do-problema)
 - [Decisão arquitetural de deploy](#decisão-arquitetural-de-deploy)
 - [Dados e rotulagem de urgência](#dados-e-rotulagem-de-urgência)
