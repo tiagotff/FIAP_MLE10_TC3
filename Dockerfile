@@ -61,7 +61,9 @@ USER app
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/health', timeout=2)"
+    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/ready', timeout=2)"
 
-# $PORT segue a convenção do Cloud Run (padrão local: 8000).
-CMD ["sh", "-c", "exec uvicorn triage.api.main:app --host 0.0.0.0 --port ${PORT}"]
+# $PORT segue a convenção do Cloud Run (padrão local: 8000). O access log
+# do uvicorn é desligado porque a aplicação registra o próprio, com
+# request-id e sem conteúdo dos laudos.
+CMD ["sh", "-c", "exec uvicorn triage.api.main:app --host 0.0.0.0 --port ${PORT} --no-access-log"]
