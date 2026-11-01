@@ -1,0 +1,32 @@
+# Fonte: Medical Abstracts Text Classification Corpus
+# (Schopf, Braun & Matthes, 2023 — licença CC BY-SA 3.0)
+# URLs fixadas em um commit específico para garantir reprodutibilidade.
+source:
+  base_url: "https://raw.githubusercontent.com/sebischair/Medical-Abstracts-TC-Corpus/70a2d9106c724729be8b3c4ddb00d1b14ec300c8"
+  files:
+    train:
+      name: medical_tc_train.csv
+      sha256: ad53aebc682d6b87a5647f619a079bb446d286fdc93bf0159b812418f5758609
+    test:
+      name: medical_tc_test.csv
+      sha256: 1eecea73c9ecad292c55e10403bd139fab9580545d6878482997c5564d51ac05
+
+columns:
+  text: medical_abstract
+  condition: condition_label
+
+# Mapeamento condição clínica -> nível de urgência da triagem.
+# Critério: tempo até dano irreversível caso o laudo não seja priorizado.
+#   urgente  -> condições cardiovasculares e neurológicas (ex.: IAM, AVC)
+#   atencao  -> neoplasias e doenças do aparelho digestivo (acompanhamento
+#               prioritário, mas raramente minuto-dependente)
+#   normal   -> condições patológicas gerais (sem sinal de gravidade aguda)
+urgency_mapping:
+  1: atencao   # neoplasms
+  2: atencao   # digestive system diseases
+  3: urgente   # nervous system diseases
+  4: urgente   # cardiovascular diseases
+  5: normal    # general pathological conditions
+
+# Ordem canônica das classes (usada nas respostas da API e nas métricas).
+labels: [normal, atencao, urgente]
