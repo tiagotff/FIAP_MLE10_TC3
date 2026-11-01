@@ -1,0 +1,28 @@
+{
+  "scenario": "baseline-uvicorn-local",
+  "measured_at": "2026-11-01T20:32:13+00:00",
+  "url": "http://localhost:8000",
+  "machine": "Linux x86_64",
+  "client_latency": {
+    "n": 1000,
+    "mean_ms": 3.391,
+    "std_ms": 1.706,
+    "min_ms": 2.449,
+    "p50_ms": 3.212,
+    "p95_ms": 4.327,
+    "p99_ms": 5.463,
+    "max_ms": 49.985,
+    "throughput_rps": 294.86
+  },
+  "server_inference": {
+    "n": 1000,
+    "mean_ms": 1.031,
+    "std_ms": 0.286,
+    "min_ms": 0.663,
+    "p50_ms": 0.962,
+    "p95_ms": 1.433,
+    "p99_ms": 1.85,
+    "max_ms": 5.149,
+    "throughput_rps": 970.03
+  }
+}
