@@ -71,7 +71,38 @@ def model_config(model_config_dict):
 
 @pytest.fixture
 def toy_frame() -> pd.DataFrame:
-    return pd.DataFrame(TOY_ROWS, columns=["condition_label", "medical_abstract"])
+    """Corpus mínimo replicado (com variação) para permitir splits estratificados."""
+    rows = [
+        (code, f"{text} case{copy}") for copy in range(5) for code, text in TOY_ROWS
+    ]
+    return pd.DataFrame(rows, columns=["condition_label", "medical_abstract"])
+
+
+@pytest.fixture
+def training_config_dict() -> dict:
+    return {
+        "split": {"validation": 0.2, "test": 0.2},
+        "calibration": {"cv_folds": 3},
+        "decision": {
+            "policy": "threshold",
+            "positive_label": "urgente",
+            "target_recall": 0.8,
+        },
+    }
+
+
+@pytest.fixture
+def tuning_config_dict() -> dict:
+    return {
+        "n_trials": 3,
+        "vectorizer": {"fixed": {"min_df": 1}, "search": {"sublinear_tf": [True]}},
+        "classifiers": {
+            "logistic_regression": {
+                "search": {"C": {"low": 0.1, "high": 10.0, "log": True}}
+            },
+            "complement_nb": {"search": {"alpha": {"low": 0.1, "high": 1.0}}},
+        },
+    }
 
 
 @pytest.fixture
@@ -86,7 +117,14 @@ def trained_pipeline(model_config, toy_frame, data_config):
 
 
 @pytest.fixture
-def project_settings(tmp_path: Path, data_config_dict, model_config_dict, toy_frame):
+def project_settings(
+    tmp_path: Path,
+    data_config_dict,
+    model_config_dict,
+    training_config_dict,
+    tuning_config_dict,
+    toy_frame,
+):
     """Settings apontando para dados/configs temporários e isolados."""
     from triage.config.settings import Settings
 
@@ -94,14 +132,22 @@ def project_settings(tmp_path: Path, data_config_dict, model_config_dict, toy_fr
     raw_dir.mkdir()
     toy_frame.to_csv(raw_dir / "train.csv", index=False)
     toy_frame.to_csv(raw_dir / "test.csv", index=False)
-    data_path, model_path = tmp_path / "data.yaml", tmp_path / "model.yaml"
-    data_path.write_text(yaml.safe_dump(data_config_dict), "utf-8")
-    model_path.write_text(yaml.safe_dump(model_config_dict), "utf-8")
+    configs = {
+        "data": data_config_dict,
+        "model": model_config_dict,
+        "training": training_config_dict,
+        "tuning": tuning_config_dict,
+    }
+    for name, content in configs.items():
+        (tmp_path / f"{name}.yaml").write_text(yaml.safe_dump(content), "utf-8")
     return Settings(
         data_raw_dir=raw_dir,
         models_dir=tmp_path / "models",
-        data_config_path=data_path,
-        model_config_path=model_path,
+        reports_dir=tmp_path / "reports",
+        data_config_path=tmp_path / "data.yaml",
+        model_config_path=tmp_path / "model.yaml",
+        training_config_path=tmp_path / "training.yaml",
+        tuning_config_path=tmp_path / "tuning.yaml",
         _env_file=None,
     )
 
@@ -113,6 +159,14 @@ def fake_predictor():
 
     class FakePredictor:
         model_version = "test-version"
+        metadata = {
+            "classifier": "logistic_regression",
+            "labels": ["normal", "atencao", "urgente"],
+            "decision": {"policy": "threshold", "threshold": 0.3},
+            "metrics": {
+                "test": {"decision_policy": {"accuracy": 0.6, "f1_macro": 0.5}}
+            },
+        }
 
         def __init__(self) -> None:
             self.calls: list[list[str]] = []

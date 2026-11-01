@@ -22,10 +22,11 @@ def save_model(model: Pipeline, path: Path) -> Path:
     return path
 
 
-def save_metadata(metadata: dict[str, Any], path: Path) -> Path:
-    """Grava os metadados do modelo em JSON legível."""
+def save_json(content: dict[str, Any], path: Path) -> Path:
+    """Grava um dicionário em JSON legível (metadados e relatórios)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), "utf-8")
+    text = json.dumps(content, indent=2, ensure_ascii=False)
+    path.write_text(text + "\n", "utf-8")
     return path
 
 

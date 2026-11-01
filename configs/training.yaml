@@ -1,0 +1,29 @@
+# Protocolo de treino e regra de decisão.
+#
+# O corpus (arquivos de treino e teste originais) é unido e deduplicado
+# antes da divisão — a divisão oficial repete textos entre treino e teste.
+# A divisão do projeto é estratificada por urgência e reprodutível (seed):
+#   treino    -> ajuste dos modelos candidatos do Optuna
+#   validação -> escolha de hiperparâmetros (Optuna)
+#   teste     -> avaliação final, usada uma única vez
+# Depois da busca, o modelo final é ajustado em treino + validação.
+split:
+  validation: 0.15
+  test: 0.15   # treino = 0.70
+
+# O limiar é calibrado com predições out-of-fold (validação cruzada
+# estratificada em treino + validação), não na mesma validação usada pelo
+# Optuna — evita probabilidades otimistas e um limiar enviesado.
+calibration:
+  cv_folds: 5
+
+# Regra que transforma probabilidades em rótulo.
+#   argmax    -> classe de maior probabilidade
+#   threshold -> classe positiva sempre que P(positiva) >= limiar; caso
+#                contrário, maior probabilidade entre as demais classes
+decision:
+  policy: threshold
+  positive_label: urgente
+  # Recall mínimo desejado para a classe positiva na validação; o limiar
+  # escolhido é o MAIOR que ainda atinge esse recall (melhor precisão).
+  target_recall: 0.85
