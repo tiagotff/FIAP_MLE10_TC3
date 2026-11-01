@@ -13,6 +13,7 @@ from sklearn.base import ClassifierMixin
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import ComplementNB
 from sklearn.pipeline import Pipeline
 
 from triage.config.loader import load_yaml
@@ -28,9 +29,15 @@ def _random_forest(params: dict[str, Any], seed: int) -> ClassifierMixin:
     return RandomForestClassifier(random_state=seed, **params)
 
 
+def _complement_nb(params: dict[str, Any], seed: int) -> ClassifierMixin:
+    # Naive Bayes é determinístico: a semente não se aplica.
+    return ComplementNB(**params)
+
+
 CLASSIFIER_REGISTRY: dict[str, ClassifierBuilder] = {
     "logistic_regression": _logistic_regression,
     "random_forest": _random_forest,
+    "complement_nb": _complement_nb,
 }
 
 

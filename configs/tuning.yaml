@@ -1,0 +1,38 @@
+# Busca de hiperparâmetros com Optuna (python -m triage.training.tune).
+#
+# Formato de cada hiperparâmetro:
+#   {low, high}                -> inteiro (se ambos inteiros) ou float
+#   {low, high, log: true}     -> float em escala logarítmica
+#   {low, high, step}          -> grade com passo fixo
+#   [a, b, ...]                -> categórico
+#
+# O espaço se restringe a opções do TF-IDF com conversão ONNX exata
+# (unigramas, stop words; sem strip_accents), preparando a etapa de
+# otimização de latência.
+n_trials: 100
+timeout_seconds: 1800
+metric: f1_macro
+
+vectorizer:
+  fixed:
+    ngram_range: [1, 1]
+    stop_words: english
+    lowercase: true
+  search:
+    max_features: {low: 10000, high: 100000, step: 10000}
+    min_df: {low: 1, high: 5}
+    max_df: {low: 0.5, high: 1.0}
+    sublinear_tf: [true, false]
+
+classifiers:
+  logistic_regression:
+    fixed:
+      max_iter: 3000
+      class_weight: balanced
+    search:
+      C: {low: 0.001, high: 10.0, log: true}
+  complement_nb:
+    fixed: {}
+    search:
+      alpha: {low: 0.01, high: 3.0, log: true}
+      norm: [true, false]

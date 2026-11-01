@@ -1,27 +1,19 @@
-# Pipeline de classificação de texto: TF-IDF + classificador leve.
+# Gerado por `python -m triage.training.tune` — não editar à mão.
+# Melhor F1 macro na validação: 0.8167 (trial 79 de 100).
 vectorizer:
-  max_features: 20000
-  ngram_range: [1, 1]
+  ngram_range:
+  - 1
+  - 1
   stop_words: english
-  min_df: 2
-  max_df: 0.95
-  sublinear_tf: true
-  strip_accents: unicode
   lowercase: true
-
-# Regularização forte (C baixo) generaliza melhor: os rótulos herdados do
-# corpus são ruidosos, sobretudo em "general pathological conditions".
-# Classificador ativo (chave do registro em triage.models.factory).
+  max_features: 30000
+  min_df: 1
+  max_df: 0.5546183574449741
+  sublinear_tf: false
 classifier:
   name: logistic_regression
   params:
     logistic_regression:
-      C: 0.1
-      max_iter: 2000
+      max_iter: 3000
       class_weight: balanced
-    random_forest:
-      n_estimators: 200
-      max_depth: null
-      min_samples_leaf: 2
-      class_weight: balanced
-      n_jobs: -1
+      C: 2.3138190262408567

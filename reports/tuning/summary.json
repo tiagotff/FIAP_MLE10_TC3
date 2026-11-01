@@ -1,0 +1,15 @@
+{
+  "completed_at": "2026-11-01T22:16:49+00:00",
+  "metric": "f1_macro (validação)",
+  "n_trials": 100,
+  "best_trial": 79,
+  "best_value": 0.816742,
+  "best_params": {
+    "classifier": "logistic_regression",
+    "tfidf__max_features": 30000,
+    "tfidf__min_df": 1,
+    "tfidf__max_df": 0.5546183574449741,
+    "tfidf__sublinear_tf": false,
+    "logistic_regression__C": 2.3138190262408567
+  }
+}
