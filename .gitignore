@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Dados brutos (baixados por `python -m triage.data.download`)
+/data/raw/*
+!/data/raw/.gitkeep
+
+# Artefatos de modelo (gerados por `python -m triage.training.train`)
+/models/*
+!/models/.gitkeep
+
+# Env
+.env
+!.env.example
+
+# Tooling
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
