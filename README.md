@@ -370,21 +370,28 @@ Medida com [`scripts/benchmark_api.py`](scripts/benchmark_api.py): 1.000 requisi
 sequenciais a `POST /predict` com laudos reais, após 100 requisições de aquecimento, com
 o servidor uvicorn em 1 worker.
 
-| Ambiente | Medida | Média | p50 | p95 | p99 | Vazão |
-|---|---|---|---|---|---|---|
-| Local (Linux, Python 3.12) | Ponta a ponta | 3,56 ms | 3,42 ms | 4,60 ms | 6,79 ms | ~281 req/s |
-| Local (Linux, Python 3.12) | Inferência do modelo | 1,21 ms | 1,13 ms | 1,60 ms | 2,02 ms | — |
-| Docker Desktop (Windows) | Ponta a ponta | 14,34 ms | 15,99 ms | 27,88 ms | 31,08 ms | ~70 req/s |
-| Docker Desktop (Windows) | Inferência do modelo | 1,20 ms | 1,01 ms | 2,21 ms | 3,43 ms | — |
+**Métrica de referência: p99.** A latência é avaliada pelo percentil 99 — o tempo que
+cobre 99 de cada 100 laudos —, e não pela média ou pela mediana. Em uma fila de triagem,
+o que importa é o pior caso frequente: uma média baixa pode esconder laudos urgentes
+esperando muito mais que o normal. O p99 é a métrica usada para comparar o modelo
+original com o otimizado (Etapa 4) e para o painel de latência do monitoramento
+(Etapa 3); média, p50 e p95 aparecem como contexto.
 
-O custo do modelo é praticamente o mesmo dentro e fora do container (~1 ms). A diferença
-ponta a ponta vem da camada de rede do Docker Desktop no Windows (VM do WSL2 e
-encaminhamento de porta): no container, o modelo responde por menos de 10% do tempo de
-resposta. Isso orienta a etapa de otimização: converter o modelo para ONNX Runtime reduz
-uma parcela pequena da latência total, e o ganho relevante em produção depende também da
-infraestrutura de rede (no Cloud Run não há essa camada de virtualização). As duas medições
-usam o modelo final. Os relatórios completos ficam em
-[`reports/latency/`](reports/latency/).
+| Ambiente | Medida | **p99** | Média | p50 | p95 | Vazão |
+|---|---|---|---|---|---|---|
+| Local (Linux, Python 3.12) | Ponta a ponta | **6,79 ms** | 3,56 ms | 3,42 ms | 4,60 ms | ~281 req/s |
+| Local (Linux, Python 3.12) | Inferência do modelo | **2,02 ms** | 1,21 ms | 1,13 ms | 1,60 ms | — |
+| Docker Desktop (Windows) | Ponta a ponta | **31,08 ms** | 14,34 ms | 15,99 ms | 27,88 ms | ~70 req/s |
+| Docker Desktop (Windows) | Inferência do modelo | **3,43 ms** | 1,20 ms | 1,01 ms | 2,21 ms | — |
+
+No p99, a inferência do modelo fica entre 2 e 3,5 ms, praticamente igual dentro e fora
+do container. A diferença ponta a ponta (6,8 ms local contra 31,1 ms no container) vem
+da camada de rede do Docker Desktop no Windows (VM do WSL2 e encaminhamento de porta):
+no container, o modelo responde por cerca de 11% do p99 ponta a ponta. Isso orienta a
+etapa de otimização: converter o modelo para ONNX Runtime reduz uma parcela pequena da
+latência total, e o ganho relevante em produção depende também da infraestrutura de rede
+(no Cloud Run não há essa camada de virtualização). As duas medições usam o modelo
+final. Os relatórios completos ficam em [`reports/latency/`](reports/latency/).
 
 Para medir contra o container:
 
@@ -410,7 +417,7 @@ poetry run python scripts/benchmark_api.py --requests 1000 --warmup 100 \
 │   └── benchmark_api.py       # benchmark de latência do endpoint /predict
 ├── src/triage/
 │   ├── api/                   # FastAPI: app, rotas, schemas, middleware, erros, logging
-│   ├── benchmark/             # estatísticas de latência (p50/p95/p99)
+│   ├── benchmark/             # estatísticas de latência (p99 como referência)
 │   ├── config/                # Settings (pydantic-settings) e leitura de YAML
 │   ├── data/                  # download, deduplicação e divisão estratificada
 │   ├── inference/             # preditores e políticas de decisão (Strategy + Factory)

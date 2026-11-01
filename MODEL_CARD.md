@@ -102,10 +102,13 @@ indica que a calibração do limiar generaliza.
 
 ### Desempenho computacional
 
-| Ambiente | Inferência do modelo (p50) | Ponta a ponta (p50) |
+Latência medida pelo **p99** (o tempo que cobre 99 de cada 100 requisições), a métrica de
+referência do projeto; o p50 aparece como contexto.
+
+| Ambiente | Inferência do modelo — **p99** (p50) | Ponta a ponta — **p99** (p50) |
 |---|---|---|
-| Local, uvicorn 1 worker | 1,13 ms | 3,42 ms |
-| Docker Desktop (Windows) | 1,01 ms | 15,99 ms |
+| Local, uvicorn 1 worker | **2,02 ms** (1,13 ms) | **6,79 ms** (3,42 ms) |
+| Docker Desktop (Windows) | **3,43 ms** (1,01 ms) | **31,08 ms** (15,99 ms) |
 
 ## Regra de decisão e trade-off
 
@@ -182,7 +185,7 @@ demais; ela tem o menor F1 (0,622) e é a classe que mais recebe alarmes falsos 
 - **Cobertura de vocabulário** (fração de termos do laudo presentes no vocabulário do
   TF-IDF): queda indica textos fora do domínio de treino — por exemplo, laudos em outro
   idioma, como mostrado acima.
-- **Latência p95 e taxa de erro** da API.
+- **Latência p99 e taxa de erro** da API.
 - **Recall de `urgente` em amostras revisadas** por especialistas, para confirmar o
   desempenho em produção.
 
