@@ -35,3 +35,10 @@ def test_measure_calls_function_for_each_text():
     assert seen == ["a", "b", "c"]
     assert len(samples) == 3
     assert all(s >= 0 for s in samples)
+
+
+def test_headline_highlights_p99():
+    line = summarize([1.0, 2.0, 3.0, 4.0]).headline()
+    assert line.startswith("p99=")
+    assert "p50=2.50 ms" in line
+    assert "n=4" in line

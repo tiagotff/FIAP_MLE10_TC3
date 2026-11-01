@@ -6,7 +6,7 @@ Envia laudos reais do split de teste, um por vez, e registra:
 
 Uso:
     python scripts/benchmark_api.py --url http://localhost:8000 \
-        --requests 1000 --output reports/latency/baseline_local.json
+        --requests 500 --output reports/latency/baseline_api.json
 """
 
 import argparse
@@ -14,12 +14,13 @@ import csv
 import json
 import platform
 import random
+import sys
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from triage.benchmark.latency import measure, summarize
+from triage.benchmark.latency import LatencySummary, measure, summarize
 
 DEFAULT_DATA = Path("data/raw/medical_tc_test.csv")
 
@@ -57,8 +58,8 @@ def post_predict(url: str, text: str) -> dict[str, Any]:
         return json.loads(response.read())
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
-    """Executa aquecimento + medição e monta o relatório."""
+def run(args: argparse.Namespace) -> dict[str, LatencySummary]:
+    """Executa aquecimento + medição; retorna os resumos por medida."""
     texts = sample_texts(args.data, args.text_column, args.requests, args.seed)
     for text in texts[: args.warmup]:
         post_predict(args.url, text)
@@ -69,20 +70,38 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     client_ms = measure(call, texts)
     return {
+        "client_latency": summarize(client_ms),
+        "server_inference": summarize(server_ms),
+    }
+
+
+def build_report(
+    args: argparse.Namespace, summaries: dict[str, LatencySummary]
+) -> dict[str, Any]:
+    """Monta o relatório JSON com o contexto da medição."""
+    return {
         "scenario": args.label,
         "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "url": args.url,
         "machine": f"{platform.system()} {platform.machine()}",
-        "client_latency": summarize(client_ms).to_dict(),
-        "server_inference": summarize(server_ms).to_dict(),
+        **{name: summary.to_dict() for name, summary in summaries.items()},
     }
+
+
+def print_headlines(summaries: dict[str, LatencySummary]) -> None:
+    """Mostra o p99 de cada medida no stderr (o stdout fica só com o JSON)."""
+    labels = {"client_latency": "Ponta a ponta", "server_inference": "Inferência"}
+    for name, summary in summaries.items():
+        print(f"{labels[name]}: {summary.headline()}", file=sys.stderr)
 
 
 def main() -> None:
     """Ponto de entrada de linha de comando."""
     args = parse_args()
-    content = json.dumps(run(args), indent=2, ensure_ascii=False)
+    summaries = run(args)
+    content = json.dumps(build_report(args, summaries), indent=2, ensure_ascii=False)
     print(content)
+    print_headlines(summaries)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(content + "\n", "utf-8")

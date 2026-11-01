@@ -1,4 +1,8 @@
-"""Estatísticas de latência reutilizáveis (API e modelo isolado)."""
+"""Estatísticas de latência reutilizáveis (API e modelo isolado).
+
+O p99 é a métrica de referência do projeto: cobre 99 de cada 100
+requisições e expõe a cauda de latência que a média esconde.
+"""
 
 import statistics
 import time
@@ -25,6 +29,13 @@ class LatencySummary:
     def to_dict(self) -> dict[str, float]:
         """Serializa o resumo com valores arredondados."""
         return {k: round(v, 3) for k, v in asdict(self).items()}
+
+    def headline(self) -> str:
+        """Resumo em uma linha, com o p99 em destaque."""
+        return (
+            f"p99={self.p99_ms:.2f} ms (p50={self.p50_ms:.2f} ms, "
+            f"média={self.mean_ms:.2f} ms, n={self.n})"
+        )
 
 
 def summarize(samples_ms: Sequence[float]) -> LatencySummary:
