@@ -360,18 +360,17 @@ o servidor uvicorn em 1 worker.
 |---|---|---|---|---|---|---|
 | Local (Linux, Python 3.12) | Ponta a ponta | 3,56 ms | 3,42 ms | 4,60 ms | 6,79 ms | ~281 req/s |
 | Local (Linux, Python 3.12) | Inferência do modelo | 1,21 ms | 1,13 ms | 1,60 ms | 2,02 ms | — |
-| Docker Desktop (Windows) | Ponta a ponta | 14,62 ms | 15,86 ms | 29,43 ms | 33,33 ms | ~68 req/s |
-| Docker Desktop (Windows) | Inferência do modelo | 1,14 ms | 1,06 ms | 1,84 ms | 2,57 ms | — |
+| Docker Desktop (Windows) | Ponta a ponta | 14,34 ms | 15,99 ms | 27,88 ms | 31,08 ms | ~70 req/s |
+| Docker Desktop (Windows) | Inferência do modelo | 1,20 ms | 1,01 ms | 2,21 ms | 3,43 ms | — |
 
 O custo do modelo é praticamente o mesmo dentro e fora do container (~1 ms). A diferença
 ponta a ponta vem da camada de rede do Docker Desktop no Windows (VM do WSL2 e
 encaminhamento de porta): no container, o modelo responde por menos de 10% do tempo de
 resposta. Isso orienta a etapa de otimização: converter o modelo para ONNX Runtime reduz
 uma parcela pequena da latência total, e o ganho relevante em produção depende também da
-infraestrutura de rede (no Cloud Run não há essa camada de virtualização). A medição no
-container foi feita com a versão inicial do modelo, de mesma arquitetura (TF-IDF +
-Regressão Logística) e custo de inferência equivalente. Os relatórios completos ficam
-em [`reports/latency/`](reports/latency/).
+infraestrutura de rede (no Cloud Run não há essa camada de virtualização). As duas medições
+usam o modelo final. Os relatórios completos ficam em
+[`reports/latency/`](reports/latency/).
 
 Para medir contra o container:
 
