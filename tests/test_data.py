@@ -4,9 +4,15 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from triage.data.dataset import build_dataset, load_split, map_conditions
+from triage.data.dataset import (
+    TextDataset,
+    build_dataset,
+    load_split,
+    map_conditions,
+)
 from triage.data.download import download_dataset, fetch_file, is_valid, sha256_of
 from triage.data.schema import DataConfig, SourceFile
+from triage.data.split import stratified_split, train_validation_test_split
 
 
 def test_map_conditions_ok(data_config):
@@ -98,3 +104,43 @@ def test_project_data_config_is_valid():
     config = DataConfig.from_yaml(Path("configs/data.yaml"))
     assert set(config.urgency_mapping.values()) == set(config.labels)
     assert {"train", "test"} <= set(config.source.files)
+
+
+def test_stratified_split_is_stratified_and_reproducible():
+    dataset = TextDataset([f"t{i}" for i in range(30)], ["a"] * 20 + ["b"] * 10)
+    rest, part = stratified_split(dataset, 0.3, seed=1)
+    again, _ = stratified_split(dataset, 0.3, seed=1)
+    assert len(rest) + len(part) == 30
+    assert part.labels.count("b") == 3
+    assert rest.texts == again.texts
+
+
+@pytest.mark.parametrize("size", [0.0, 1.0, 1.5])
+def test_stratified_split_rejects_invalid_size(size):
+    with pytest.raises(ValueError, match="entre 0 e 1"):
+        stratified_split(TextDataset(["a", "b"], ["x", "y"]), size, seed=0)
+
+
+def test_train_validation_test_split_70_15_15():
+    labels = ["a"] * 60 + ["b"] * 40
+    dataset = TextDataset([f"t{i}" for i in range(100)], labels)
+    splits = train_validation_test_split(dataset, 0.15, 0.15, seed=7)
+    assert splits.sizes() == {"train": 70, "validation": 15, "test": 15}
+    all_texts = splits.train.texts + splits.validation.texts + splits.test.texts
+    assert sorted(all_texts) == sorted(dataset.texts)
+    assert splits.test.labels.count("b") == 6
+
+
+def test_train_validation_test_split_requires_room_for_train():
+    dataset = TextDataset(["a", "b"], ["x", "y"])
+    with pytest.raises(ValueError, match="somar menos que 1"):
+        train_validation_test_split(dataset, 0.5, 0.5, seed=0)
+
+
+def test_load_corpus_concatenates_all_files(tmp_path, data_config, toy_frame):
+    from triage.data.dataset import load_corpus
+
+    toy_frame.to_csv(tmp_path / "train.csv", index=False)
+    toy_frame.head(3).to_csv(tmp_path / "test.csv", index=False)
+    corpus = load_corpus(tmp_path, data_config)
+    assert len(corpus) == len(toy_frame) + 3
