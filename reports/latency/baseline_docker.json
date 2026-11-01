@@ -1,0 +1,28 @@
+{
+  "scenario": "baseline-docker",
+  "measured_at": "2026-11-01T21:28:48+00:00",
+  "url": "http://localhost:8000",
+  "machine": "Windows AMD64",
+  "client_latency": {
+    "n": 1000,
+    "mean_ms": 14.623,
+    "std_ms": 7.118,
+    "min_ms": 4.529,
+    "p50_ms": 15.861,
+    "p95_ms": 29.428,
+    "p99_ms": 33.333,
+    "max_ms": 35.453,
+    "throughput_rps": 68.384
+  },
+  "server_inference": {
+    "n": 1000,
+    "mean_ms": 1.14,
+    "std_ms": 0.377,
+    "min_ms": 0.707,
+    "p50_ms": 1.055,
+    "p95_ms": 1.835,
+    "p99_ms": 2.566,
+    "max_ms": 5.031,
+    "throughput_rps": 876.878
+  }
+}
