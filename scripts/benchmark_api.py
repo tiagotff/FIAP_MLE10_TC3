@@ -6,7 +6,7 @@ Envia laudos reais do split de teste, um por vez, e registra:
 
 Uso:
     python scripts/benchmark_api.py --url http://localhost:8000 \
-        --requests 500 --output reports/latency/baseline_api.json
+        --requests 1000 --output reports/latency/baseline_local.json
 """
 
 import argparse
