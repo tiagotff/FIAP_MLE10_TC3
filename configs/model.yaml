@@ -1,0 +1,27 @@
+# Pipeline de classificação de texto: TF-IDF + classificador leve.
+vectorizer:
+  max_features: 20000
+  ngram_range: [1, 1]
+  stop_words: english
+  min_df: 2
+  max_df: 0.95
+  sublinear_tf: true
+  strip_accents: unicode
+  lowercase: true
+
+# Regularização forte (C baixo) generaliza melhor: os rótulos herdados do
+# corpus são ruidosos, sobretudo em "general pathological conditions".
+# Classificador ativo (chave do registro em triage.models.factory).
+classifier:
+  name: logistic_regression
+  params:
+    logistic_regression:
+      C: 0.1
+      max_iter: 2000
+      class_weight: balanced
+    random_forest:
+      n_estimators: 200
+      max_depth: null
+      min_samples_leaf: 2
+      class_weight: balanced
+      n_jobs: -1
