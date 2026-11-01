@@ -10,7 +10,8 @@ de retreino, monitoramento e otimização de latência.
 - [Contexto do problema](#contexto-do-problema)
 - [Decisão arquitetural de deploy](#decisão-arquitetural-de-deploy)
 - [Dados e rotulagem de urgência](#dados-e-rotulagem-de-urgência)
-- [Modelo](#modelo)
+- [Protocolo de treino e otimização](#protocolo-de-treino-e-otimização)
+- [Desempenho do modelo](#desempenho-do-modelo)
 - [Latência baseline](#latência-baseline)
 - [Estrutura do repositório](#estrutura-do-repositório)
 - [Como executar](#como-executar)
@@ -77,7 +78,7 @@ flowchart LR
 
 | Alternativa | Por que não foi a escolha principal |
 |---|---|
-| Vertex AI Endpoints | Mantém nós sempre ligados (custo maior) e brilha com GPU/modelos grandes — não é o caso de um modelo de ~2 MB. |
+| Vertex AI Endpoints | Mantém nós sempre ligados (custo maior) e brilha com GPU/modelos grandes — não é o caso de um modelo de ~1 MB. |
 | GKE (Kubernetes) | Controle total, mas exige operar cluster; desproporcional para um único serviço. |
 | Cloud Functions | Menor controle de runtime e *cold start* mais frequente. |
 | AWS (App Runner / ECS Fargate) e Azure (Container Apps) | Equivalentes técnicos ao Cloud Run; a escolha do GCP se deve à região São Paulo disponível, ao modelo de cobrança por requisição e à continuidade com a stack já usada pela equipe. |
@@ -91,8 +92,10 @@ da predição.
 ## Dados e rotulagem de urgência
 
 **Fonte:** [Medical Abstracts Text Classification Corpus](https://github.com/sebischair/Medical-Abstracts-TC-Corpus)
-(Schopf, Braun & Matthes, 2023) — 14.438 resumos clínicos em inglês, com divisão
-oficial treino/teste (11.550 / 2.888) e 5 classes de condição do paciente.
+(Schopf, Braun & Matthes, 2023) — 14.438 registros de resumos clínicos em inglês,
+distribuídos em dois arquivos (treino e teste) e 5 classes de condição do paciente.
+
+### Mapeamento condição → urgência
 
 O corpus rotula **condição**, não urgência. Para atender ao cenário de triagem, as 5
 condições foram agrupadas em 3 níveis pelo critério *tempo até dano irreversível caso o
@@ -106,59 +109,152 @@ laudo não seja priorizado*:
 | Digestive system diseases | **atenção** | Acompanhamento prioritário |
 | General pathological conditions | **normal** | Sem sinal específico de gravidade aguda |
 
-Distribuição resultante (treino + teste): urgente 4.976 · atenção 4.657 · normal 4.805 —
-classes praticamente balanceadas.
-
-**Limitações:** o mapeamento é uma *proxy* de urgência definida no nível da doença, não
-do caso individual (um laudo cardiológico de rotina recebe o rótulo `urgente`). Além
-disso, a classe *general pathological conditions* é heterogênea e se sobrepõe às demais,
-o que limita a acurácia de qualquer modelo neste corpus. Para uso clínico real, os rótulos
-deveriam vir de triagem feita por especialistas.
-
 O mapeamento é declarativo e está em [`configs/data.yaml`](configs/data.yaml). O download
 fixa um commit do repositório de origem e valida o SHA-256 de cada arquivo.
 
-## Modelo
+### Qualidade dos dados: duplicatas e vazamento
 
-Pipeline scikit-learn **TF-IDF (unigramas, 20 mil termos, stop words em inglês) +
-Regressão Logística** (`C=0.1`, `class_weight="balanced"`), configurado em
-[`configs/model.yaml`](configs/model.yaml). A criação do classificador usa o padrão
-**Factory** (`triage.models.factory`): trocar para Random Forest é uma mudança de uma
-linha no YAML.
+A análise exploratória revelou dois problemas no corpus original:
 
-Avaliação no split de teste oficial (2.888 laudos):
+- **3.211 registros duplicados.** Um resumo associado a várias condições aparece uma vez
+  para cada uma delas. Restam **11.227 textos únicos**, dos quais **2.681 têm rótulos de
+  urgência conflitantes** — o mesmo texto marcado, por exemplo, como `normal` e `urgente`.
+- **Vazamento na divisão oficial.** **1.010 textos do arquivo de teste também estão no
+  arquivo de treino.** Avaliar nessa divisão mede, em parte, memorização.
 
-| Métrica | Valor |
-|---|---|
-| Acurácia | 0,647 |
-| F1 macro | 0,643 |
-| **Recall de `urgente`** | **0,718** |
+Tratamento adotado:
+
+1. Os dois arquivos são unidos e cada texto passa a aparecer **uma única vez**.
+2. Textos com rótulos conflitantes recebem o **mais urgente** — regra conservadora de
+   triagem: na dúvida, prioriza-se o paciente.
+3. O corpus deduplicado é redividido de forma **estratificada e reprodutível (seed 42)**
+   em **70% treino / 15% validação / 15% teste**.
+
+| Conjunto | Laudos | normal | atencao | urgente |
+|---|---|---|---|---|
+| Treino (70%) | 7.859 | 1.676 | 2.838 | 3.345 |
+| Validação (15%) | 1.684 | 359 | 608 | 717 |
+| Teste (15%) | 1.684 | 359 | 608 | 717 |
+| **Total** | **11.227** | 2.394 (21%) | 4.054 (36%) | 4.779 (43%) |
+
+A proporção 70/15/15 reserva ~1.700 laudos para validação e para teste, o que dá
+estimativas estáveis nas duas etapas (o recall de `urgente` no teste, por exemplo, é
+medido sobre 717 laudos). O desbalanceamento é tratado com `class_weight="balanced"`.
+
+**Limitações:** o mapeamento é uma *proxy* de urgência definida no nível da doença, não
+do caso individual (um laudo cardiológico de rotina recebe o rótulo `urgente`). A classe
+*general pathological conditions* é heterogênea, o que mantém `normal` como a classe mais
+difícil. Para uso clínico real, os rótulos deveriam vir de triagem feita por especialistas.
+
+## Protocolo de treino e otimização
+
+```mermaid
+flowchart LR
+    C["Corpus deduplicado<br/>11.227"] --> TR["Treino 70%<br/>7.859"]
+    C --> VA["Validação 15%<br/>1.684"]
+    C --> TE["Teste 15%<br/>1.684"]
+    TR --> OPT["Optuna<br/>100 trials"]
+    VA -->|F1 macro| OPT
+    OPT -->|configs/model.yaml| CV["Validação cruzada 5 folds<br/>treino + validação"]
+    CV -->|limiar de urgente| FIN["Modelo final<br/>treino + validação"]
+    FIN -->|avaliação única| TE
+```
+
+1. **Busca de hiperparâmetros com Optuna** (`python -m triage.training.tune`). Cada
+   trial treina no **treino** e é avaliado na **validação**; o teste nunca participa. O
+   amostrador TPE (semente fixa) explora 100 combinações de TF-IDF + classificador
+   (Regressão Logística ou Complement Naive Bayes), maximizando o F1 macro. A melhor
+   configuração é gravada em [`configs/model.yaml`](configs/model.yaml), versionado: o
+   treino é determinístico a partir dela, e a busca é um passo offline. O espaço de
+   busca fica em [`configs/tuning.yaml`](configs/tuning.yaml) e o histórico completo em
+   [`reports/tuning/`](reports/tuning/).
+2. **Espaço de busca compatível com ONNX.** Só entram opções do TF-IDF com conversão
+   exata para ONNX Runtime (unigramas, stop words; sem `strip_accents`, que o conversor
+   não suporta). O modelo final foi convertido em teste: **100% de concordância** de
+   rótulos com o scikit-learn e diferença máxima de probabilidade de ~2·10⁻⁷, o que
+   preserva o comportamento na etapa de otimização de latência.
+3. **Limiar de decisão para `urgente`, calibrado fora da validação do Optuna.** Em
+   triagem, deixar passar um laudo urgente custa muito mais do que um alarme falso. Em
+   vez de escolher sempre a classe mais provável (argmax), o modelo classifica como
+   `urgente` sempre que `P(urgente) ≥ limiar`. O limiar é o **maior valor que garante
+   recall ≥ 0,85** nas probabilidades **out-of-fold** de uma validação cruzada
+   estratificada de 5 folds sobre treino + validação — cada laudo é pontuado por um
+   modelo que não o viu. Calibrar na própria validação usada pelo Optuna produziria
+   probabilidades otimistas: nos testes, esse caminho levou a um limiar mais alto e a
+   recall de apenas 0,805 no teste, abaixo da meta.
+4. **Modelo final em treino + validação.** Com hiperparâmetros e limiar definidos, o
+   modelo é reajustado em 85% dos dados, e o **teste (15%) é usado uma única vez**.
+
+Os parâmetros do protocolo (frações, folds, meta de recall) ficam em
+[`configs/training.yaml`](configs/training.yaml).
+
+**Configuração escolhida pelo Optuna:** TF-IDF com 30 mil termos, `min_df=1`,
+`max_df≈0,55`, sem `sublinear_tf` + Regressão Logística com `C≈2,31` e
+`class_weight="balanced"`. A Regressão Logística venceu a busca (melhor F1 macro na
+validação: 0,817, contra 0,759 do Naive Bayes), e os melhores trials formam um platô
+(F1 ≈ 0,813–0,817 com 30 a 80 mil termos), indicando convergência. **Limiar calibrado:**
+0,376.
+
+## Desempenho do modelo
+
+Avaliação no **teste** (1.684 laudos nunca vistos), comparando a decisão por argmax com a
+política de limiar usada em produção:
+
+| Métrica | Argmax | **Limiar (produção)** |
+|---|---|---|
+| Acurácia | 0,795 | **0,804** |
+| F1 macro | 0,772 | **0,776** |
+| **Recall de `urgente`** | 0,796 | **0,847** |
+| Precisão de `urgente` | 0,865 | 0,848 |
+| Laudos urgentes não sinalizados | 146 | **110** |
+
+O limiar **reduz em 25% os laudos urgentes que passariam despercebidos** (146 → 110), ao
+custo de 20 alarmes falsos adicionais, e ainda **melhora** acurácia e F1 macro. O recall
+no teste (0,847) ficou praticamente na meta definida na calibração (0,85), o que mostra
+que a calibração out-of-fold generaliza.
+
+Validação cruzada (5 folds, out-of-fold em treino + validação) com o limiar: acurácia
+0,809, F1 macro 0,785, recall de `urgente` 0,850 — coerente com o teste.
+
+Matriz de confusão no teste (política de limiar; linhas = real, colunas = previsto):
+
+| | normal | atencao | urgente |
+|---|---|---|---|
+| **normal** | 222 | 56 | 81 |
+| **atencao** | 55 | 525 | 28 |
+| **urgente** | 78 | 32 | **607** |
 
 | Classe | Precisão | Recall | F1 |
 |---|---|---|---|
-| normal | 0,530 | 0,463 | 0,494 |
-| atencao | 0,709 | 0,762 | 0,735 |
-| urgente | 0,681 | 0,718 | 0,699 |
+| normal | 0,625 | 0,618 | 0,622 |
+| atencao | 0,856 | 0,863 | 0,860 |
+| urgente | 0,848 | 0,847 | 0,847 |
 
-O recall de `urgente` é a métrica clinicamente crítica: um laudo urgente classificado
-como normal é o erro mais caro da triagem. A regularização forte (`C` baixo) superou
-configurações com bigramas e Random Forest nos experimentos iniciais, coerente com o ruído
-dos rótulos. As métricas completas de cada treino ficam em `models/metadata.json`.
+O relatório completo (dados, decisão, validação cruzada e teste, nas duas políticas)
+fica em [`reports/model/metrics.json`](reports/model/metrics.json).
 
 ## Latência baseline
 
 Medida com [`scripts/benchmark_api.py`](scripts/benchmark_api.py): 1.000 requisições
-sequenciais a `POST /predict` com laudos reais do split de teste, após 100 requisições de
-aquecimento; servidor uvicorn com 1 worker, Python 3.12, CPU x86_64.
+sequenciais a `POST /predict` com laudos reais, após 100 requisições de aquecimento, com
+o servidor uvicorn em 1 worker.
 
-| Medida | Média | p50 | p95 | p99 | Vazão |
-|---|---|---|---|---|---|
-| Latência ponta a ponta (cliente) | 3,39 ms | 3,21 ms | 4,33 ms | 5,46 ms | ~295 req/s |
-| Inferência do modelo (servidor) | 0,99 ms | 0,94 ms | 1,30 ms | 1,74 ms | — |
+| Ambiente | Medida | Média | p50 | p95 | p99 | Vazão |
+|---|---|---|---|---|---|---|
+| Local (Linux, Python 3.12) | Ponta a ponta | 3,56 ms | 3,42 ms | 4,60 ms | 6,79 ms | ~281 req/s |
+| Local (Linux, Python 3.12) | Inferência do modelo | 1,21 ms | 1,13 ms | 1,60 ms | 2,02 ms | — |
+| Docker Desktop (Windows) | Ponta a ponta | 14,62 ms | 15,86 ms | 29,43 ms | 33,33 ms | ~68 req/s |
+| Docker Desktop (Windows) | Inferência do modelo | 1,14 ms | 1,06 ms | 1,84 ms | 2,57 ms | — |
 
-Cerca de 70% do tempo de resposta está fora do modelo (HTTP, validação, serialização).
-Os relatórios completos ficam em [`reports/latency/`](reports/latency/) e servem de
-referência para a etapa de otimização (ONNX Runtime).
+O custo do modelo é praticamente o mesmo dentro e fora do container (~1 ms). A diferença
+ponta a ponta vem da camada de rede do Docker Desktop no Windows (VM do WSL2 e
+encaminhamento de porta): no container, o modelo responde por menos de 10% do tempo de
+resposta. Isso orienta a etapa de otimização: converter o modelo para ONNX Runtime reduz
+uma parcela pequena da latência total, e o ganho relevante em produção depende também da
+infraestrutura de rede (no Cloud Run não há essa camada de virtualização). A medição no
+container foi feita com a versão inicial do modelo, de mesma arquitetura (TF-IDF +
+Regressão Logística) e custo de inferência equivalente. Os relatórios completos ficam
+em [`reports/latency/`](reports/latency/).
 
 Para medir contra o container:
 
@@ -172,19 +268,24 @@ poetry run python scripts/benchmark_api.py --requests 1000 --warmup 100 \
 
 ```
 ├── configs/
-│   ├── data.yaml              # fonte, checksums e mapeamento condição → urgência
-│   └── model.yaml             # hiperparâmetros do TF-IDF e do classificador
-├── reports/latency/           # resultados dos benchmarks de latência
+│   ├── data.yaml              # fonte, checksums, mapeamento e escala de urgência
+│   ├── model.yaml             # melhor pipeline encontrado pelo Optuna (gerado)
+│   ├── training.yaml          # divisão 70/15/15, calibração (CV) e regra de decisão
+│   └── tuning.yaml            # espaço de busca e orçamento do Optuna
+├── reports/
+│   ├── latency/               # benchmarks de latência
+│   ├── model/                 # dados, decisão e métricas (validação cruzada e teste)
+│   └── tuning/                # histórico de trials e resumo da busca
 ├── scripts/
 │   └── benchmark_api.py       # benchmark de latência do endpoint /predict
 ├── src/triage/
-│   ├── api/                   # FastAPI: app, rotas e schemas
+│   ├── api/                   # FastAPI: app, rotas, schemas, middleware, erros, logging
 │   ├── benchmark/             # estatísticas de latência (p50/p95/p99)
 │   ├── config/                # Settings (pydantic-settings) e leitura de YAML
-│   ├── data/                  # download com checksum e preparação do dataset
-│   ├── inference/             # preditores (Strategy) e carregamento (Factory)
+│   ├── data/                  # download, deduplicação e divisão estratificada
+│   ├── inference/             # preditores e políticas de decisão (Strategy + Factory)
 │   ├── models/                # Factory de pipelines TF-IDF + classificador
-│   └── training/              # treino, avaliação e persistência de artefatos
+│   └── training/              # Optuna, calibração OOF, treino, avaliação e artefatos
 ├── tests/                     # testes unitários e de API (pytest)
 ├── Dockerfile                 # multi-stage: treino → dependências → runtime
 └── pyproject.toml             # dependências (Poetry) e configuração do ruff/pytest
@@ -206,21 +307,23 @@ poetry install
 cp .env.example .env
 
 poetry run python -m triage.data.download      # baixa e valida o corpus
-poetry run python -m triage.training.train     # treina e salva em models/
+poetry run python -m triage.training.tune      # (opcional) refaz a busca do Optuna
+poetry run python -m triage.training.train     # calibra o limiar, treina e avalia
 poetry run uvicorn triage.api.main:app --port 8000
 ```
 
-Documentação interativa: <http://localhost:8000/docs>.
+A busca do Optuna leva cerca de 2 minutos e regrava `configs/model.yaml`. Sem ela, o treino
+usa a configuração já versionada. Documentação interativa: <http://localhost:8000/docs>.
 
 ### Docker
 
-A imagem treina o modelo durante o build (dados e seed fixados), então um único comando
-gera um serviço funcional:
+A imagem treina o modelo durante o build (dados, configuração e seed fixados), então um
+único comando gera um serviço funcional:
 
 ```bash
 docker build -t triage-api:latest .
 docker run -d --name triage-api -p 8000:8000 triage-api:latest
-curl http://localhost:8000/health
+curl http://localhost:8000/ready
 ```
 
 Para servir um modelo treinado fora do build, monte o diretório de artefatos:
@@ -229,15 +332,18 @@ Para servir um modelo treinado fora do build, monte o diretório de artefatos:
 docker run -d -p 8000:8000 -v "$(pwd)/models:/app/models" triage-api:latest
 ```
 
-A imagem final roda com usuário não-root, possui `HEALTHCHECK` e não inclui Poetry,
-pandas, dados de treino nem dependências de desenvolvimento.
+A imagem final roda com usuário não-root, tem `HEALTHCHECK` em `/ready` e não inclui
+Poetry, pandas, Optuna, dados de treino nem dependências de desenvolvimento.
 
 ## API
 
 | Método | Rota | Descrição |
 |---|---|---|
-| `GET` | `/health` | Estado do serviço e versão do modelo carregado |
+| `GET` | `/health` | *Liveness*: o processo responde (inclui se o modelo está carregado) |
+| `GET` | `/ready` | *Readiness*: `200` somente com o modelo carregado; `503` caso contrário |
+| `GET` | `/model` | Versão, classificador, regra de decisão (limiar) e métricas de teste |
 | `POST` | `/predict` | Classifica a urgência de um laudo |
+| `POST` | `/predict/batch` | Classifica até 64 laudos em uma chamada, preservando a ordem |
 | `GET` | `/docs` | Swagger UI |
 
 Exemplo:
@@ -251,28 +357,53 @@ curl -X POST http://localhost:8000/predict \
 ```json
 {
   "label": "urgente",
-  "confidence": 0.41,
-  "probabilities": {"atencao": 0.21, "normal": 0.38, "urgente": 0.41},
-  "model_version": "20261101T202805Z",
+  "confidence": 0.70,
+  "probabilities": {"normal": 0.20, "atencao": 0.09, "urgente": 0.70},
+  "model_version": "20261101T221821Z",
   "inference_ms": 1.2
 }
 ```
 
-Toda resposta inclui o header `X-Process-Time-Ms` com o tempo total de processamento no
-servidor. Textos vazios ou acima de 20.000 caracteres retornam `422`; se o modelo não
-estiver carregado, `/predict` retorna `503`.
+`probabilities` segue sempre a ordem `normal`, `atencao`, `urgente`. O rótulo aplica o
+limiar calibrado: um laudo é `urgente` sempre que `P(urgente) ≥ 0,376`, mesmo que outra
+classe tenha probabilidade maior.
+
+**Robustez e privacidade:**
+
+- **Rastreabilidade:** toda resposta traz `X-Request-ID` (reaproveitado do cliente quando
+  válido, ou gerado) e `X-Process-Time-Ms`. O access log registra método, rota, status,
+  duração e request-id.
+- **Privacidade (LGPD):** o texto dos laudos nunca é logado, e as respostas de erro de
+  validação (`422`) informam o campo e o motivo **sem ecoar o conteúdo enviado**.
+- **Erros previsíveis:** textos vazios, acima de 20.000 caracteres ou lotes fora de 1–64
+  itens retornam `422`; sem modelo, as rotas de predição retornam `503`; falhas
+  inesperadas retornam `500` com mensagem genérica e o `request_id`, sem detalhes internos.
+- **Fail-fast:** se o artefato do modelo não puder ser carregado, a aplicação não sobe,
+  em vez de aceitar tráfego sem modelo.
 
 ## Qualidade de código e testes
 
-- **Padrões de projeto:** Factory para classificadores e backends de inferência;
-  Strategy para o preditor (`UrgencyPredictor`), o que permite trocar scikit-learn por
-  ONNX Runtime sem alterar a API; injeção de dependência do preditor na aplicação
-  FastAPI (facilita testes).
-- **Clean code:** funções curtas e de responsabilidade única, type hints em todo o código,
-  docstrings em português (Google style), configuração fora do código (YAML + `.env`).
-- **Reprodutibilidade:** dependências travadas em `poetry.lock`, seed fixa, dataset com
-  commit e checksum fixados.
-- **Ferramentas:** `ruff` (lint + formatação) e `pre-commit`.
+- **SOLID na prática:**
+  - *Responsabilidade única:* download, deduplicação, divisão, tuning, calibração,
+    treino, avaliação, inferência e API em módulos separados.
+  - *Aberto/fechado:* classificadores, backends de inferência e políticas de decisão
+    entram por registro (Factory), sem alterar quem os usa.
+  - *Inversão de dependência:* a API depende do protocolo `UrgencyPredictor`, e o
+    preditor recebe a `DecisionPolicy` por injeção. Trocar scikit-learn por ONNX Runtime,
+    ou argmax por limiar, não toca nos endpoints.
+- **Padrões de projeto:** Factory (classificadores, preditores, políticas), Strategy
+  (backend de inferência e regra de decisão) e injeção de dependência do preditor na
+  aplicação FastAPI.
+- **Clean code:** funções curtas e de responsabilidade única, type hints em todo o
+  código, docstrings e mensagens de erro em português, configuração fora do código
+  (YAML validado com Pydantic + `.env`).
+- **Reprodutibilidade:** dependências travadas em `poetry.lock` e separadas por grupo
+  (treino, tuning, API, dev); seeds fixas na divisão, na validação cruzada, no Optuna e
+  nos modelos; dataset com commit e checksum fixados; divisões com tamanhos exatos
+  (frações convertidas em contagens, sem erro de ponto flutuante).
+- **Testes:** testes unitários e de API (pytest), incluindo garantias de privacidade (o
+  texto do laudo não aparece em logs nem em erros); ferramentas `ruff` (lint +
+  formatação) e `pre-commit`.
 
 ```bash
 poetry run ruff check .
