@@ -5,6 +5,9 @@ servido por uma API REST (FastAPI) empacotada em Docker. O projeto cobre o ciclo
 vida do modelo em produção: decisão arquitetural de deploy em nuvem, CI/CD, orquestração
 de retreino, monitoramento e otimização de latência.
 
+> 📄 Uso pretendido, métricas, limitações e considerações éticas do modelo estão
+> resumidos no [Model Card](MODEL_CARD.md).
+
 ## Quickstart
 
 Sequência única, do zero, para quem acabou de clonar o repositório. Cada comando assume
@@ -258,10 +261,21 @@ A proporção 70/15/15 reserva ~1.700 laudos para validação e para teste, o qu
 estimativas estáveis nas duas etapas (o recall de `urgente` no teste, por exemplo, é
 medido sobre 717 laudos). O desbalanceamento é tratado com `class_weight="balanced"`.
 
-**Limitações:** o mapeamento é uma *proxy* de urgência definida no nível da doença, não
-do caso individual (um laudo cardiológico de rotina recebe o rótulo `urgente`). A classe
-*general pathological conditions* é heterogênea, o que mantém `normal` como a classe mais
-difícil. Para uso clínico real, os rótulos deveriam vir de triagem feita por especialistas.
+### Limitações
+
+- **Idioma.** O corpus está em inglês e o modelo só entende inglês. Em laudos em
+  português, apenas 18–29% dos termos existem no vocabulário do TF-IDF; a confiança cai
+  (de 0,70 para 0,40 no caso de infarto) e há troca de classe (um laudo de úlcera gástrica
+  passa de `atencao` para `normal`). Para o cenário de um hospital brasileiro, é preciso
+  retreinar com laudos em português rotulados por especialistas, mantendo a mesma
+  arquitetura e o mesmo protocolo. O teste completo está no [Model Card](MODEL_CARD.md#limitações).
+- **Domínio.** Os textos são resumos de artigos científicos, não laudos de casos
+  individuais; o desempenho precisa ser medido em dados do próprio hospital antes de uso real.
+- **Rótulo *proxy*.** A urgência é definida no nível da doença, não do caso (um laudo
+  cardiológico de rotina recebe `urgente`). Rótulos de triagem feitos por especialistas
+  eliminariam essa limitação.
+- **Classe `normal`.** Vem da categoria heterogênea *general pathological conditions*,
+  que se sobrepõe às demais, e por isso é a classe mais difícil.
 
 ## Protocolo de treino e otimização
 
@@ -404,6 +418,7 @@ poetry run python scripts/benchmark_api.py --requests 1000 --warmup 100 \
 │   └── training/              # Optuna, calibração OOF, treino, avaliação e artefatos
 ├── tests/                     # testes unitários e de API (pytest)
 ├── Dockerfile                 # multi-stage: treino → dependências → runtime
+├── MODEL_CARD.md              # uso pretendido, métricas, limitações e ética do modelo
 └── pyproject.toml             # dependências (Poetry) e configuração do ruff/pytest
 ```
 
