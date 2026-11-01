@@ -1,0 +1,27 @@
+# Controle de versão e CI
+.git
+.github
+.gitignore
+.pre-commit-config.yaml
+
+# Ambientes e caches locais
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# Dados e artefatos locais (o modelo é gerado dentro do build)
+data
+models
+reports
+
+# Fora do escopo da imagem
+tests
+scripts
+docs
+.env
