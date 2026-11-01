@@ -2,16 +2,20 @@
 
 A API depende apenas do protocolo `UrgencyPredictor`; o backend concreto
 (scikit-learn hoje, ONNX Runtime na etapa de otimização) é escolhido na
-inicialização, sem alterar os endpoints.
+inicialização, sem alterar os endpoints. A regra de decisão
+(`DecisionPolicy`) é injetada, e não embutida no backend.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import joblib
 import numpy as np
 from sklearn.pipeline import Pipeline
+
+from triage.inference.policy import ArgmaxPolicy, DecisionPolicy
 
 
 @dataclass(frozen=True)
@@ -27,38 +31,64 @@ class UrgencyPredictor(Protocol):
     """Contrato mínimo de qualquer backend de inferência."""
 
     model_version: str
+    metadata: dict[str, Any]
 
     def predict(self, texts: list[str]) -> list[Prediction]:
         """Classifica uma lista de textos."""
         ...
 
 
-def to_predictions(probas: np.ndarray, classes: list[str]) -> list[Prediction]:
-    """Converte a matriz de probabilidades em objetos `Prediction`."""
-    results: list[Prediction] = []
-    for row in probas:
-        best = int(np.argmax(row))
-        results.append(
-            Prediction(
-                label=classes[best],
-                confidence=float(row[best]),
-                probabilities={c: float(p) for c, p in zip(classes, row, strict=True)},
-            )
+def column_order(classes: Sequence[str], labels: Sequence[str]) -> list[int]:
+    """Índices que reordenam as colunas de `classes` na ordem de `labels`.
+
+    Raises:
+        ValueError: Se os conjuntos de classes divergirem.
+    """
+    if set(classes) != set(labels):
+        raise ValueError(
+            f"Classes do modelo {sorted(classes)} diferem das esperadas "
+            f"{sorted(labels)}."
         )
-    return results
+    return [list(classes).index(label) for label in labels]
+
+
+def to_predictions(
+    probas: np.ndarray, labels: Sequence[str], chosen: np.ndarray
+) -> list[Prediction]:
+    """Monta as predições a partir das probabilidades e dos índices escolhidos."""
+    return [
+        Prediction(
+            label=labels[idx],
+            confidence=float(row[idx]),
+            probabilities={c: float(p) for c, p in zip(labels, row, strict=True)},
+        )
+        for row, idx in zip(probas, chosen, strict=True)
+    ]
 
 
 class SklearnPredictor:
     """Backend baseado no pipeline scikit-learn serializado com joblib."""
 
-    def __init__(self, pipeline: Pipeline, model_version: str = "unknown") -> None:
+    def __init__(
+        self,
+        pipeline: Pipeline,
+        policy: DecisionPolicy | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.metadata = metadata or {}
+        self.model_version = str(self.metadata.get("model_version", "unknown"))
+        classes = [str(c) for c in pipeline.classes_]
+        self._labels = list(self.metadata.get("labels") or classes)
+        self._order = column_order(classes, self._labels)
         self._pipeline = pipeline
-        self._classes = [str(c) for c in pipeline.classes_]
-        self.model_version = model_version
+        self._policy = policy or ArgmaxPolicy()
 
     @classmethod
     def from_path(
-        cls, path: Path, model_version: str = "unknown"
+        cls,
+        path: Path,
+        policy: DecisionPolicy | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> "SklearnPredictor":
         """Carrega o pipeline a partir do disco.
 
@@ -70,8 +100,10 @@ class SklearnPredictor:
                 f"Modelo não encontrado em {path}. "
                 "Execute: python -m triage.training.train"
             )
-        return cls(joblib.load(path), model_version)
+        return cls(joblib.load(path), policy, metadata)
 
     def predict(self, texts: list[str]) -> list[Prediction]:
-        """Classifica uma lista de textos."""
-        return to_predictions(self._pipeline.predict_proba(texts), self._classes)
+        """Classifica uma lista de textos (probabilidades na ordem canônica)."""
+        probas = self._pipeline.predict_proba(texts)[:, self._order]
+        chosen = self._policy.decide(probas, self._labels)
+        return to_predictions(probas, self._labels, chosen)

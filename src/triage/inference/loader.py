@@ -2,12 +2,14 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from triage.config.settings import Settings
+from triage.inference.policy import DecisionPolicy, build_policy
 from triage.inference.predictor import SklearnPredictor, UrgencyPredictor
 from triage.training.artifacts import load_metadata
 
-PredictorBuilder = Callable[[Path, str], UrgencyPredictor]
+PredictorBuilder = Callable[[Path, DecisionPolicy, dict[str, Any]], UrgencyPredictor]
 
 PREDICTOR_REGISTRY: dict[str, PredictorBuilder] = {
     "sklearn": SklearnPredictor.from_path,
@@ -15,7 +17,10 @@ PREDICTOR_REGISTRY: dict[str, PredictorBuilder] = {
 
 
 def load_predictor(settings: Settings, backend: str = "sklearn") -> UrgencyPredictor:
-    """Instancia o preditor do backend escolhido com a versão do modelo.
+    """Instancia o preditor do backend escolhido, com política e metadados.
+
+    A política de decisão (ex.: limiar calibrado para `urgente`) é lida dos
+    metadados gravados no treino; sem metadados, usa-se argmax.
 
     Raises:
         ValueError: Se o backend não estiver registrado.
@@ -24,5 +29,6 @@ def load_predictor(settings: Settings, backend: str = "sklearn") -> UrgencyPredi
     if builder is None:
         available = ", ".join(sorted(PREDICTOR_REGISTRY))
         raise ValueError(f"Backend '{backend}' desconhecido. Opções: {available}")
-    version = load_metadata(settings.metadata_path).get("model_version", "unknown")
-    return builder(settings.model_path, version)
+    metadata = load_metadata(settings.metadata_path)
+    policy = build_policy(metadata.get("decision"))
+    return builder(settings.model_path, policy, metadata)
