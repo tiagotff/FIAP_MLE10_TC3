@@ -28,5 +28,7 @@ urgency_mapping:
   4: urgente   # cardiovascular diseases
   5: normal    # general pathological conditions
 
-# Ordem canônica das classes (usada nas respostas da API e nas métricas).
+# Ordem canônica das classes, em ordem CRESCENTE de urgência. Usada nas
+# respostas da API, nas métricas e na deduplicação: um texto que aparece
+# com mais de um rótulo no corpus fica com o mais urgente.
 labels: [normal, atencao, urgente]

@@ -53,3 +53,21 @@ def load_split(raw_dir: Path, split: str, config: DataConfig) -> TextDataset:
             f"Arquivo {path} não encontrado. Execute: python -m triage.data.download"
         )
     return build_dataset(pd.read_csv(path), config)
+
+
+def concat_datasets(datasets: list[TextDataset]) -> TextDataset:
+    """Concatena datasets preservando a ordem."""
+    texts = [text for dataset in datasets for text in dataset.texts]
+    labels = [label for dataset in datasets for label in dataset.labels]
+    return TextDataset(texts=texts, labels=labels)
+
+
+def load_corpus(raw_dir: Path, config: DataConfig) -> TextDataset:
+    """Carrega e une todos os arquivos declarados na fonte de dados.
+
+    A divisão oficial treino/teste do corpus é descartada: ela contém textos
+    repetidos entre os dois arquivos, e a divisão do projeto é refeita após
+    a deduplicação.
+    """
+    splits = [load_split(raw_dir, split, config) for split in config.source.files]
+    return concat_datasets(splits)
