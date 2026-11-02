@@ -1,0 +1,120 @@
+# Regras do Prometheus para a API de triagem.
+#
+# Recording rules: pré-calculam as séries usadas no dashboard e nos alertas
+# (p99 de latência, taxa de erro, distribuição das predições e cobertura de
+# vocabulário), para que ambos usem exatamente a mesma definição.
+#
+# Alertas: aparecem em http://localhost:9090/alerts. Não há Alertmanager
+# nesta stack local; em produção, ele faria o roteamento (e-mail, Slack...).
+#
+# Referências do modelo (conjunto de teste, ver MODEL_CARD.md):
+#   - cobertura de vocabulário média em laudos do domínio: ~0,97
+#     (1% dos laudos abaixo de 0,875); em português, ~0,2-0,3;
+#   - proporção de `urgente` nos dados: ~43%.
+
+groups:
+  - name: triage-recording
+    interval: 15s
+    rules:
+      # --- Latência (p99 é a métrica de referência do projeto) ---
+      - record: triage:http_request_duration_seconds:p99_1m
+        expr: >
+          histogram_quantile(0.99,
+            sum by (le, route) (rate(triage_http_request_duration_seconds_bucket[1m])))
+      - record: triage:http_request_duration_seconds:p95_1m
+        expr: >
+          histogram_quantile(0.95,
+            sum by (le, route) (rate(triage_http_request_duration_seconds_bucket[1m])))
+      - record: triage:http_request_duration_seconds:p50_1m
+        expr: >
+          histogram_quantile(0.50,
+            sum by (le, route) (rate(triage_http_request_duration_seconds_bucket[1m])))
+      - record: triage:inference_duration_seconds:p99_1m
+        expr: >
+          histogram_quantile(0.99,
+            sum by (le, endpoint) (rate(triage_inference_duration_seconds_bucket[1m])))
+
+      # --- Tráfego e erros ---
+      - record: triage:http_requests:rate1m
+        expr: sum by (route, status) (rate(triage_http_requests_total[1m]))
+      - record: triage:http_errors:ratio_rate1m
+        expr: >
+          sum(rate(triage_http_requests_total{status=~"5.."}[1m]))
+          / clamp_min(sum(rate(triage_http_requests_total[1m])), 1e-9)
+
+      # --- Predições e drift ---
+      - record: triage:predictions:share_5m
+        expr: >
+          sum by (label) (increase(triage_predictions_total[5m]))
+          / ignoring (label) group_left
+          clamp_min(sum(increase(triage_predictions_total[5m])), 1e-9)
+      - record: triage:predictions:count_5m
+        expr: sum(increase(triage_predictions_total[5m]))
+      - record: triage:vocabulary_coverage:mean_5m
+        expr: >
+          sum(rate(triage_vocabulary_coverage_ratio_sum[5m]))
+          / clamp_min(sum(rate(triage_vocabulary_coverage_ratio_count[5m])), 1e-9)
+      - record: triage:vocabulary_coverage:low_share_5m
+        expr: >
+          sum(rate(triage_vocabulary_coverage_ratio_bucket{le="0.5"}[5m]))
+          / clamp_min(sum(rate(triage_vocabulary_coverage_ratio_count[5m])), 1e-9)
+
+  - name: triage-alerts
+    rules:
+      - alert: TriageApiDown
+        expr: up{job="triage-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: API de triagem fora do ar
+          description: O Prometheus não consegue coletar {{ $labels.instance }} há 1 minuto.
+
+      - alert: TriageHighP99Latency
+        expr: triage:http_request_duration_seconds:p99_1m{route="/predict"} > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Latência p99 de /predict acima de 100 ms
+          description: "p99 atual: {{ $value | humanizeDuration }}."
+
+      - alert: TriageHighErrorRate
+        expr: triage:http_errors:ratio_rate1m > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Mais de 5% das requisições com erro 5xx
+          description: "Taxa de erro atual: {{ $value | humanizePercentage }}."
+
+      - alert: TriageVocabularyDrift
+        expr: >
+          triage:vocabulary_coverage:mean_5m < 0.8
+          and on () triage:predictions:count_5m > 20
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Laudos fora do domínio de treino (cobertura de vocabulário baixa)
+          description: >-
+            Cobertura média de {{ $value | humanizePercentage }} (esperado ~97%).
+            Possíveis causas: laudos em outro idioma ou de outra especialidade.
+            As predições perdem confiabilidade; avalie retreino.
+
+      - alert: TriageUrgentShareShift
+        expr: >
+          (
+            triage:predictions:share_5m{label="urgente"} > 0.58
+            or triage:predictions:share_5m{label="urgente"} < 0.28
+          )
+          and on () triage:predictions:count_5m > 50
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: Proporção de laudos urgentes fora do padrão
+          description: >-
+            {{ $value | humanizePercentage }} dos laudos classificados como urgentes
+            (esperado ~43%, faixa aceita de 28% a 58%). Pode ser mudança real no
+            perfil dos pacientes ou drift nos dados.

@@ -1,0 +1,141 @@
+# Testes unitários das regras (executados no CI):
+#   promtool test rules monitoring/prometheus/rules_test.yml
+#
+# Séries sintéticas com intervalo de 15s; `a+bxN` = começa em a e soma b,
+# N vezes.
+
+rule_files:
+  - rules.yml
+
+evaluation_interval: 15s
+
+tests:
+  # Laudos em português: cobertura média ~25%, bem abaixo do esperado.
+  - interval: 15s
+    input_series:
+      - series: triage_vocabulary_coverage_ratio_sum
+        values: "0+2.5x60"
+      - series: triage_vocabulary_coverage_ratio_count
+        values: "0+10x60"
+      - series: 'triage_vocabulary_coverage_ratio_bucket{le="0.5"}'
+        values: "0+10x60"
+      - series: 'triage_predictions_total{label="normal"}'
+        values: "0+10x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TriageVocabularyDrift
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Laudos fora do domínio de treino (cobertura de vocabulário baixa)
+              description: >-
+                Cobertura média de 25% (esperado ~97%). Possíveis causas: laudos
+                em outro idioma ou de outra especialidade. As predições perdem
+                confiabilidade; avalie retreino.
+    promql_expr_test:
+      - expr: triage:vocabulary_coverage:low_share_5m
+        eval_time: 10m
+        exp_samples:
+          - labels: triage:vocabulary_coverage:low_share_5m
+            value: 1
+
+  # Laudos do domínio (cobertura ~97%): nenhum alerta de drift.
+  - interval: 15s
+    input_series:
+      - series: triage_vocabulary_coverage_ratio_sum
+        values: "0+9.7x60"
+      - series: triage_vocabulary_coverage_ratio_count
+        values: "0+10x60"
+      - series: 'triage_predictions_total{label="urgente"}'
+        values: "0+4x60"
+      - series: 'triage_predictions_total{label="atencao"}'
+        values: "0+4x60"
+      - series: 'triage_predictions_total{label="normal"}'
+        values: "0+2x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TriageVocabularyDrift
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: TriageUrgentShareShift
+        exp_alerts: []
+    promql_expr_test:
+      - expr: triage:predictions:share_5m{label="urgente"}
+        eval_time: 10m
+        exp_samples:
+          - labels: 'triage:predictions:share_5m{label="urgente"}'
+            value: 0.4
+
+  # Só laudos urgentes: proporção muito acima dos ~43% esperados.
+  - interval: 15s
+    input_series:
+      - series: 'triage_predictions_total{label="urgente"}'
+        values: "0+10x80"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TriageUrgentShareShift
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              label: urgente
+            exp_annotations:
+              summary: Proporção de laudos urgentes fora do padrão
+              description: >-
+                100% dos laudos classificados como urgentes (esperado ~43%, faixa
+                aceita de 28% a 58%). Pode ser mudança real no perfil dos
+                pacientes ou drift nos dados.
+
+  # 10% de erros 5xx por mais de 2 minutos.
+  - interval: 15s
+    input_series:
+      - series: 'triage_http_requests_total{route="/predict",status="200"}'
+        values: "0+9x40"
+      - series: 'triage_http_requests_total{route="/predict",status="500"}'
+        values: "0+1x40"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TriageHighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Mais de 5% das requisições com erro 5xx
+              description: "Taxa de erro atual: 10%."
+
+  # Todas as requisições de /predict levando ~200 ms.
+  - interval: 15s
+    input_series:
+      - series: 'triage_http_request_duration_seconds_bucket{route="/predict",le="0.1"}'
+        values: "0x40"
+      - series: 'triage_http_request_duration_seconds_bucket{route="/predict",le="0.25"}'
+        values: "0+10x40"
+      - series: 'triage_http_request_duration_seconds_bucket{route="/predict",le="+Inf"}'
+        values: "0+10x40"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TriageHighP99Latency
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              route: /predict
+            exp_annotations:
+              summary: Latência p99 de /predict acima de 100 ms
+              description: "p99 atual: 248.5ms."
+
+  # API fora do ar.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="triage-api",instance="api:8000"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: TriageApiDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: triage-api
+              instance: api:8000
+            exp_annotations:
+              summary: API de triagem fora do ar
+              description: O Prometheus não consegue coletar api:8000 há 1 minuto.
