@@ -106,13 +106,14 @@ indica que a calibração do limiar generaliza.
 Latência medida pelo **p99** (o tempo que cobre 99 de cada 100 requisições), a métrica de
 referência do projeto; o p50 aparece entre parênteses.
 
-| Medida (Linux, Python 3.12) | scikit-learn | **ONNX Runtime** |
+| Medida (Linux, Python 3.12, salvo indicação) | scikit-learn | **ONNX Runtime** |
 |---|---|---|
 | Modelo isolado, 1 laudo por chamada | 2,48 ms (1,03 ms) | **0,72 ms (0,26 ms)** — 3,5x |
 | Modelo isolado, lote de 32 laudos | 7,49 ms (5,05 ms) | 9,06 ms (6,75 ms) |
 | API, inferência sob 8 clientes simultâneos | 16,49 ms (4,20 ms) | **6,78 ms (1,18 ms)** |
 | API, ponta a ponta sob 8 clientes simultâneos | 65,10 ms (34,47 ms) | **51,51 ms (23,85 ms)** |
 | Carga do modelo | 254 ms | **22 ms** |
+| Docker Desktop (Windows), ponta a ponta sob 8 clientes | 66,93 ms (29,89 ms) | **44,19 ms (22,51 ms)** |
 
 Baseline no Docker Desktop (Windows), com scikit-learn: inferência 3,43 ms e ponta a
 ponta 31,08 ms no p99; a diferença vem da camada de rede do Docker Desktop. Os dois

@@ -1,0 +1,30 @@
+{
+  "scenario": "docker-onnx-c8",
+  "measured_at": "2026-11-02T15:15:21+00:00",
+  "url": "http://localhost:8000",
+  "concurrency": 8,
+  "wall_throughput_rps": 331.6,
+  "machine": "Windows AMD64",
+  "client_latency": {
+    "n": 1000,
+    "mean_ms": 23.787,
+    "std_ms": 6.404,
+    "min_ms": 7.061,
+    "p50_ms": 22.507,
+    "p95_ms": 36.229,
+    "p99_ms": 44.195,
+    "max_ms": 48.863,
+    "throughput_rps": 42.039
+  },
+  "server_inference": {
+    "n": 1000,
+    "mean_ms": 1.746,
+    "std_ms": 1.232,
+    "min_ms": 0.274,
+    "p50_ms": 1.398,
+    "p95_ms": 4.095,
+    "p99_ms": 6.789,
+    "max_ms": 8.799,
+    "throughput_rps": 572.636
+  }
+}

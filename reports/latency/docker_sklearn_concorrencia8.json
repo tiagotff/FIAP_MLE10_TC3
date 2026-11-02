@@ -1,0 +1,30 @@
+{
+  "scenario": "docker-sklearn-c8",
+  "measured_at": "2026-11-02T15:15:15+00:00",
+  "url": "http://localhost:8001",
+  "concurrency": 8,
+  "wall_throughput_rps": 244.7,
+  "machine": "Windows AMD64",
+  "client_latency": {
+    "n": 1000,
+    "mean_ms": 32.047,
+    "std_ms": 9.865,
+    "min_ms": 7.954,
+    "p50_ms": 29.885,
+    "p95_ms": 49.793,
+    "p99_ms": 66.929,
+    "max_ms": 85.627,
+    "throughput_rps": 31.204
+  },
+  "server_inference": {
+    "n": 1000,
+    "mean_ms": 3.244,
+    "std_ms": 1.989,
+    "min_ms": 0.678,
+    "p50_ms": 2.771,
+    "p95_ms": 7.037,
+    "p99_ms": 9.827,
+    "max_ms": 18.155,
+    "throughput_rps": 308.272
+  }
+}

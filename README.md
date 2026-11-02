@@ -754,6 +754,19 @@ serialização e log de cada requisição. **Sob carga, o ONNX reduz o p99 do mo
 ONNX Runtime libera o GIL, as requisições simultâneas deixam de disputar o interpretador
 Python. Relatórios completos em [`reports/latency/`](reports/latency/).
 
+**No Docker Desktop (Windows)**, no mesmo ambiente do [baseline](#latência-baseline), a
+mesma imagem com `INFERENCE_BACKEND=sklearn` e com o padrão `onnx`, 1.000 requisições com 8
+clientes simultâneos:
+
+| Medida | scikit-learn — p99 (p50) | **ONNX — p99 (p50)** | Variação no p99 |
+|---|---|---|---|
+| Inferência do modelo | 9,83 ms (2,77) | **6,79 ms** (1,40) | −31% |
+| Ponta a ponta | 66,93 ms (29,89) | **44,19 ms** (22,51) | −34% |
+| Vazão | 245 req/s | **332 req/s** | +36% |
+
+O ganho se repete fora do Linux: **o p99 ponta a ponta cai um terço** no container, e a
+vazão sobe mais de um terço com o mesmo hardware.
+
 ### E a quantização?
 
 Foi avaliada e **não se aplica** a este modelo. A quantização dinâmica do ONNX Runtime
