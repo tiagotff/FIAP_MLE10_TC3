@@ -196,7 +196,12 @@ poetry install
 poetry run python -m triage.data.download     # commit e SHA-256 fixados
 poetry run python -m triage.training.tune     # opcional: refaz a busca do Optuna
 poetry run python -m triage.training.train    # gera models/ e reports/model/metrics.json
+poetry run python -m triage.pipeline.run      # alternativa: pipeline com quality gate
 ```
+
+Em produção, o retreino é orquestrado pela DAG `triage_retraining` do Airflow, que só
+publica um novo modelo se ele passar no quality gate (F1 macro ≥ 0,74 e recall de
+`urgente` ≥ 0,80 no teste) e mantém cada versão publicada em `models/archive/`.
 
 Configurações: [`configs/data.yaml`](configs/data.yaml),
 [`configs/model.yaml`](configs/model.yaml), [`configs/training.yaml`](configs/training.yaml)

@@ -1,5 +1,7 @@
 # Triagem Automática de Laudos Médicos — FIAP MLE10 Tech Challenge Fase 03
 
+[![CI/CD](https://github.com/tiagotff/FIAP_MLE10_TC3/actions/workflows/ci.yml/badge.svg)](https://github.com/tiagotff/FIAP_MLE10_TC3/actions/workflows/ci.yml)
+
 Serviço de NLP que classifica laudos médicos em **normal**, **atenção** ou **urgente**,
 servido por uma API REST (FastAPI) empacotada em Docker. O projeto cobre o ciclo de
 vida do modelo em produção: decisão arquitetural de deploy em nuvem, CI/CD, orquestração
@@ -12,7 +14,8 @@ de retreino, monitoramento e otimização de latência.
 
 Sequência única, do zero, para quem acabou de clonar o repositório. Cada comando assume
 que você está na pasta raiz do projeto e usa **Git Bash** (Linux/macOS: mesmos
-comandos). Há dois caminhos independentes: **local com Poetry** ou **somente Docker**.
+comandos). Há dois caminhos para rodar a API — **local com Poetry** ou **somente
+Docker** — e um terceiro para o **retreino orquestrado pelo Airflow**.
 
 > Pré-requisitos: Python 3.11 ou 3.12, [Poetry](https://python-poetry.org/) 2.x e
 > Docker. Para o caminho só com Docker, basta o Docker.
@@ -117,6 +120,27 @@ docker rm -f triage-api
 Resultado esperado em ambos os caminhos: `"label":"urgente"` no `/predict` e, no treino,
 `[teste/decision_policy] acurácia=0.8040 f1_macro=0.7763 recall_urgente=0.8466`.
 
+### Opção C — Retreino com Airflow
+
+```bash
+# 1. Subir o Airflow (constrói a imagem na primeira vez; leva alguns minutos)
+docker compose -f airflow/docker-compose.yml up -d --build
+
+# 2. Abrir http://localhost:8080 (sem login), ativar a DAG `triage_retraining`
+#    e clicar em "Trigger". Ou, pelo terminal:
+docker compose -f airflow/docker-compose.yml exec airflow airflow dags unpause triage_retraining
+docker compose -f airflow/docker-compose.yml exec airflow airflow dags trigger triage_retraining
+
+# 3. Ao final, o modelo aprovado pelo quality gate está em models/ (e arquivado em
+#    models/archive/<versão>/)
+ls models models/archive
+
+# 4. Encerrar
+docker compose -f airflow/docker-compose.yml down
+```
+
+Detalhes em [Pipeline de retreino (Airflow)](#pipeline-de-retreino-airflow).
+
 > ⚠️ **Windows:** se `poetry env use 3.12` falhar, aponte o executável diretamente:
 > `poetry env use "$(py -3.12 -c 'import sys; print(sys.executable)')"`. Se o `poetry`
 > apresentar erros de importação ao rodar qualquer comando, reinstale-o com
@@ -133,6 +157,8 @@ Resultado esperado em ambos os caminhos: `"label":"urgente"` no `/predict` e, no
 - [Protocolo de treino e otimização](#protocolo-de-treino-e-otimização)
 - [Desempenho do modelo](#desempenho-do-modelo)
 - [Latência baseline](#latência-baseline)
+- [CI/CD (GitHub Actions)](#cicd-github-actions)
+- [Pipeline de retreino (Airflow)](#pipeline-de-retreino-airflow)
 - [Estrutura do repositório](#estrutura-do-repositório)
 - [Como executar](#como-executar)
 - [API](#api)
@@ -401,13 +427,105 @@ poetry run python scripts/benchmark_api.py --requests 1000 --warmup 100 \
     --label baseline-docker --output reports/latency/baseline_docker.json
 ```
 
+## CI/CD (GitHub Actions)
+
+O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda a cada push e pull
+request na `main` (e manualmente, via *workflow_dispatch*):
+
+```mermaid
+flowchart LR
+    L["lint<br/>ruff check + format"] --> T["test<br/>pytest + cobertura<br/>Python 3.11 e 3.12"]
+    L --> D["dag<br/>integridade da DAG<br/>(Airflow 3.3)"]
+    T --> DA["docker-api<br/>build + smoke test"]
+    D --> DA
+    T --> DF["docker-airflow<br/>build + validação"]
+    D --> DF
+    DA --> P["publish<br/>imagem no GHCR<br/>(só push na main)"]
+    DF --> P
+```
+
+| Job | O que garante |
+|---|---|
+| `lint` | Código sem erros de lint e formatado (`ruff check` e `ruff format --check`) |
+| `test` | Suíte completa de testes com cobertura, em Python 3.11 e 3.12; o relatório `coverage.xml` fica como artefato da execução |
+| `dag` | A DAG é importada sem erros e mantém as tasks e a ordem esperadas (`airflow/tests`) |
+| `docker-api` | A imagem da API é construída (treinando o modelo), sobe, responde em `/ready` e classifica um laudo de infarto como `urgente` |
+| `docker-airflow` | A imagem do Airflow é construída, o venv de ML importa o projeto e a DAG é carregada dentro da imagem |
+| `publish` | Em push na `main`, publica a imagem da API em `ghcr.io/tiagotff/triage-api` com as tags `latest` e o SHA do commit |
+
+Os jobs seguintes só rodam se os anteriores passarem, e os builds Docker usam cache do
+GitHub Actions. A publicação no GHCR é a etapa de entrega contínua: em produção, o Cloud
+Run seria atualizado a partir dessa imagem (ver
+[Decisão arquitetural](#decisão-arquitetural-de-deploy)).
+
+## Pipeline de retreino (Airflow)
+
+A DAG [`triage_retraining`](airflow/dags/triage_retraining.py) automatiza o retreino com o
+mesmo protocolo do treino manual, em etapas independentes:
+
+```mermaid
+flowchart LR
+    R[run_identifier] --> P
+    DL[download_data] --> P[prepare_data]
+    P --> C[calibrate_threshold]
+    C --> TR[train_model]
+    TR --> E[evaluate_model]
+    E --> G{quality_gate}
+    G -->|aprovado| PUB[publish_model]
+    G -.->|reprovado| X[modelo atual mantido]
+```
+
+| Task | Etapa ([`triage.pipeline.steps`](src/triage/pipeline/steps.py)) |
+|---|---|
+| `download_data` | Baixa o corpus com commit e SHA-256 fixados (idempotente) |
+| `prepare_data` | Deduplica e divide em treino/validação/teste (70/15/15) |
+| `calibrate_threshold` | Calibra o limiar de `urgente` com validação cruzada em treino + validação |
+| `train_model` | Treina o modelo final em treino + validação |
+| `evaluate_model` | Avalia no teste, com argmax e com a política de limiar |
+| `quality_gate` | Falha a execução se F1 macro < 0,74 ou recall de `urgente` < 0,80 no teste |
+| `publish_model` | Arquiva a versão em `models/archive/<versão>/` e troca o modelo em uso de forma atômica |
+
+**Decisões de projeto:**
+
+- **Ambiente de ML isolado.** As constraints oficiais do Airflow 3.3 fixam scikit-learn
+  1.9 e pandas 3, enquanto a API usa scikit-learn 1.7. Para que o modelo seja treinado
+  com exatamente as versões que vão carregá-lo, as tasks de ML rodam com
+  `@task.external_python` num venv próprio, instalado a partir do **mesmo `poetry.lock`**
+  da API ([`airflow/Dockerfile`](airflow/Dockerfile)).
+- **Etapas idempotentes e isoladas.** Cada task lê e grava arquivos em
+  `artifacts/runs/<run_id>/`; pelo XCom trafegam só resumos (tamanhos, limiar, métricas).
+  Qualquer etapa pode ser repetida sozinha pela interface do Airflow.
+- **Quality gate antes de publicar.** Um retreino que piore o modelo é barrado e o modelo
+  em produção continua o mesmo. Os mínimos ficam em
+  [`configs/training.yaml`](configs/training.yaml).
+- **Publicação atômica e versionada.** O modelo novo é escrito em arquivo temporário e
+  trocado com `os.replace`, então a API nunca lê um artefato pela metade; cada versão
+  publicada fica arquivada para rollback.
+- **Agendamento semanal** (`@weekly`), sem *catchup* e com no máximo uma execução por vez.
+
+A mesma sequência roda sem Airflow, útil para desenvolvimento:
+
+```bash
+poetry run python -m triage.pipeline.run
+```
+
+A DAG foi validada com `airflow dags test` e pelo scheduler do Airflow 3.3.2 (execuções
+agendada e manual): as 8 tasks concluem com sucesso e o modelo publicado tem as mesmas
+métricas do treino manual (F1 macro 0,776; recall de `urgente` 0,847).
+
 ## Estrutura do repositório
 
 ```
+├── .github/workflows/ci.yml   # CI/CD: lint, testes, DAG, builds Docker e publicação
+├── airflow/
+│   ├── dags/                  # DAG de retreino (triage_retraining)
+│   ├── tests/                 # testes de integridade da DAG
+│   ├── Dockerfile             # Airflow + venv de ML a partir do poetry.lock
+│   └── docker-compose.yml     # Airflow standalone local
 ├── configs/
 │   ├── data.yaml              # fonte, checksums, mapeamento e escala de urgência
 │   ├── model.yaml             # melhor pipeline encontrado pelo Optuna (gerado)
-│   ├── training.yaml          # divisão 70/15/15, calibração (CV) e regra de decisão
+│   ├── training.yaml          # divisão 70/15/15, calibração, decisão e quality gate
 │   └── tuning.yaml            # espaço de busca e orçamento do Optuna
 ├── reports/
 │   ├── latency/               # benchmarks de latência
@@ -422,6 +540,7 @@ poetry run python scripts/benchmark_api.py --requests 1000 --warmup 100 \
 │   ├── data/                  # download, deduplicação e divisão estratificada
 │   ├── inference/             # preditores e políticas de decisão (Strategy + Factory)
 │   ├── models/                # Factory de pipelines TF-IDF + classificador
+│   ├── pipeline/              # etapas do retreino, quality gate e execução sem Airflow
 │   └── training/              # Optuna, calibração OOF, treino, avaliação e artefatos
 ├── tests/                     # testes unitários e de API (pytest)
 ├── Dockerfile                 # multi-stage: treino → dependências → runtime
@@ -447,6 +566,7 @@ cp .env.example .env
 poetry run python -m triage.data.download      # baixa e valida o corpus
 poetry run python -m triage.training.tune      # (opcional) refaz a busca do Optuna
 poetry run python -m triage.training.train     # calibra o limiar, treina e avalia
+poetry run python -m triage.pipeline.run       # (alternativa) pipeline com quality gate
 poetry run uvicorn triage.api.main:app --port 8000
 ```
 
@@ -555,7 +675,7 @@ poetry run pre-commit install    # hooks executados a cada commit
 | Etapa | Entregáveis |
 |---|---|
 | 1. Decisão arquitetural e API inicial | Decisão de deploy (esta documentação), API FastAPI em Docker, latência baseline |
-| 2. CI/CD e pipeline de treino | Workflow GitHub Actions (lint → test → build) e DAG Airflow de treino |
+| 2. CI/CD e pipeline de treino | [Workflow GitHub Actions](#cicd-github-actions) (lint → testes → DAG → builds → GHCR) e [DAG Airflow](#pipeline-de-retreino-airflow) de retreino com quality gate |
 | 3. Monitoramento | Métricas `prometheus_client`, Docker Compose (API + Prometheus + Grafana) e dashboard |
 | 4. Otimização de latência | Modelo exportado para ONNX Runtime e comparação de latência |
 
