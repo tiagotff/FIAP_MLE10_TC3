@@ -1,0 +1,11 @@
+# Carrega os dashboards versionados em monitoring/grafana/dashboards.
+apiVersion: 1
+
+providers:
+  - name: triage
+    folder: Triagem de Laudos
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards
