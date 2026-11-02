@@ -281,5 +281,16 @@
         }
       }
     }
+  },
+  "onnx": {
+    "file": "model.onnx",
+    "size_bytes": 1521259,
+    "parity": {
+      "samples": 14438,
+      "max_abs_diff": 1.8683572167166318e-07,
+      "label_agreement": 1.0,
+      "tolerance": 0.0001,
+      "passed": true
+    }
   }
 }

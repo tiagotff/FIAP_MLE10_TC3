@@ -1,0 +1,74 @@
+{
+  "measured_at": "2026-11-02T14:44:33+00:00",
+  "machine": "Linux x86_64",
+  "python": "3.12.3",
+  "requests": 2000,
+  "batch_size": 32,
+  "label_agreement": 1.0,
+  "backends": {
+    "sklearn": {
+      "artifact": "model.joblib",
+      "artifact_bytes": 1003222,
+      "load_ms": 254.1,
+      "single": {
+        "n": 2000,
+        "mean_ms": 1.124,
+        "std_ms": 0.341,
+        "min_ms": 0.645,
+        "p50_ms": 1.031,
+        "p95_ms": 1.758,
+        "p99_ms": 2.483,
+        "max_ms": 4.438,
+        "throughput_rps": 889.328
+      },
+      "batch": {
+        "n": 65,
+        "mean_ms": 5.139,
+        "std_ms": 1.122,
+        "min_ms": 2.429,
+        "p50_ms": 5.048,
+        "p95_ms": 7.054,
+        "p99_ms": 7.489,
+        "max_ms": 7.761,
+        "throughput_rps": 194.606
+      }
+    },
+    "onnx": {
+      "artifact": "model.onnx",
+      "artifact_bytes": 1521259,
+      "load_ms": 22.1,
+      "single": {
+        "n": 2000,
+        "mean_ms": 0.288,
+        "std_ms": 0.12,
+        "min_ms": 0.136,
+        "p50_ms": 0.258,
+        "p95_ms": 0.497,
+        "p99_ms": 0.717,
+        "max_ms": 1.652,
+        "throughput_rps": 3477.887
+      },
+      "batch": {
+        "n": 65,
+        "mean_ms": 6.613,
+        "std_ms": 1.204,
+        "min_ms": 3.062,
+        "p50_ms": 6.753,
+        "p95_ms": 8.176,
+        "p99_ms": 9.063,
+        "max_ms": 9.543,
+        "throughput_rps": 151.215
+      }
+    }
+  },
+  "speedup_onnx_vs_sklearn": {
+    "single": {
+      "p50": 4.0,
+      "p99": 3.46
+    },
+    "batch": {
+      "p50": 0.75,
+      "p99": 0.83
+    }
+  }
+}

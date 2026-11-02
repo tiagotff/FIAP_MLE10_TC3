@@ -1,0 +1,30 @@
+{
+  "scenario": "api-onnx-sequencial",
+  "measured_at": "2026-11-02T14:45:25+00:00",
+  "url": "http://localhost:8010",
+  "concurrency": 1,
+  "wall_throughput_rps": 230.2,
+  "machine": "Linux x86_64",
+  "client_latency": {
+    "n": 1000,
+    "mean_ms": 4.341,
+    "std_ms": 2.918,
+    "min_ms": 2.486,
+    "p50_ms": 4.017,
+    "p95_ms": 6.097,
+    "p99_ms": 9.601,
+    "max_ms": 78.865,
+    "throughput_rps": 230.366
+  },
+  "server_inference": {
+    "n": 1000,
+    "mean_ms": 0.602,
+    "std_ms": 2.336,
+    "min_ms": 0.298,
+    "p50_ms": 0.486,
+    "p95_ms": 0.791,
+    "p99_ms": 1.186,
+    "max_ms": 74.01,
+    "throughput_rps": 1662.052
+  }
+}

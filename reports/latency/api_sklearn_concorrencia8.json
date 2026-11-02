@@ -1,0 +1,30 @@
+{
+  "scenario": "api-sklearn-concorrencia8",
+  "measured_at": "2026-11-02T14:45:18+00:00",
+  "url": "http://localhost:8010",
+  "concurrency": 8,
+  "wall_throughput_rps": 223.2,
+  "machine": "Linux x86_64",
+  "client_latency": {
+    "n": 2000,
+    "mean_ms": 35.701,
+    "std_ms": 11.001,
+    "min_ms": 4.594,
+    "p50_ms": 34.473,
+    "p95_ms": 48.609,
+    "p99_ms": 65.1,
+    "max_ms": 173.965,
+    "throughput_rps": 28.01
+  },
+  "server_inference": {
+    "n": 2000,
+    "mean_ms": 5.071,
+    "std_ms": 3.734,
+    "min_ms": 0.857,
+    "p50_ms": 4.197,
+    "p95_ms": 11.212,
+    "p99_ms": 16.488,
+    "max_ms": 49.879,
+    "throughput_rps": 197.191
+  }
+}

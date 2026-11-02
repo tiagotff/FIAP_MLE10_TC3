@@ -1,0 +1,30 @@
+{
+  "scenario": "api-sklearn-sequencial",
+  "measured_at": "2026-11-02T14:45:08+00:00",
+  "url": "http://localhost:8010",
+  "concurrency": 1,
+  "wall_throughput_rps": 173.5,
+  "machine": "Linux x86_64",
+  "client_latency": {
+    "n": 1000,
+    "mean_ms": 5.759,
+    "std_ms": 1.197,
+    "min_ms": 3.496,
+    "p50_ms": 5.586,
+    "p95_ms": 7.743,
+    "p99_ms": 9.701,
+    "max_ms": 17.861,
+    "throughput_rps": 173.63
+  },
+  "server_inference": {
+    "n": 1000,
+    "mean_ms": 1.51,
+    "std_ms": 0.352,
+    "min_ms": 0.949,
+    "p50_ms": 1.47,
+    "p95_ms": 2.026,
+    "p99_ms": 2.728,
+    "max_ms": 5.474,
+    "throughput_rps": 662.328
+  }
+}

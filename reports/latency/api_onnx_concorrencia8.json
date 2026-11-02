@@ -1,0 +1,30 @@
+{
+  "scenario": "api-onnx-concorrencia8",
+  "measured_at": "2026-11-02T14:45:32+00:00",
+  "url": "http://localhost:8010",
+  "concurrency": 8,
+  "wall_throughput_rps": 322.0,
+  "machine": "Linux x86_64",
+  "client_latency": {
+    "n": 2000,
+    "mean_ms": 24.743,
+    "std_ms": 7.329,
+    "min_ms": 7.509,
+    "p50_ms": 23.85,
+    "p95_ms": 34.572,
+    "p99_ms": 51.512,
+    "max_ms": 94.151,
+    "throughput_rps": 40.415
+  },
+  "server_inference": {
+    "n": 2000,
+    "mean_ms": 1.703,
+    "std_ms": 1.558,
+    "min_ms": 0.26,
+    "p50_ms": 1.183,
+    "p95_ms": 4.607,
+    "p99_ms": 6.777,
+    "max_ms": 25.695,
+    "throughput_rps": 587.219
+  }
+}
