@@ -8,8 +8,11 @@ import statistics
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
+from typing import TypeVar
 
 import numpy as np
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -61,8 +64,8 @@ def summarize(samples_ms: Sequence[float]) -> LatencySummary:
     )
 
 
-def measure(call: Callable[[str], object], texts: Sequence[str]) -> list[float]:
-    """Executa `call` para cada texto e retorna as latências em ms."""
+def measure(call: Callable[[T], object], texts: Sequence[T]) -> list[float]:
+    """Executa `call` para cada entrada (texto ou lote) e retorna as latências em ms."""
     samples: list[float] = []
     for text in texts:
         start = time.perf_counter()

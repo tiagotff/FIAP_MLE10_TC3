@@ -1,12 +1,15 @@
 """Mede a latência ponta a ponta do endpoint /predict.
 
-Envia laudos reais do split de teste, um por vez, e registra:
+Envia laudos reais do split de teste, um por vez (ou com N clientes
+simultâneos, via `--concurrency`), e registra:
   - latência no cliente (rede + serialização + inferência);
   - tempo de inferência informado pela própria API (`inference_ms`).
 
 Uso:
     python scripts/benchmark_api.py --url http://localhost:8000 \
         --requests 500 --output reports/latency/baseline_api.json
+    python scripts/benchmark_api.py --concurrency 8 --requests 2000 \
+        --label onnx-concorrente --output reports/latency/api_onnx_c8.json
 """
 
 import argparse
@@ -15,7 +18,9 @@ import json
 import platform
 import random
 import sys
+import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -34,6 +39,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
     parser.add_argument("--text-column", default="medical_abstract")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="clientes simultâneos (1 = sequencial, como no baseline)",
+    )
     parser.add_argument("--label", default="baseline", help="Rótulo do cenário")
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args()
@@ -59,7 +70,12 @@ def post_predict(url: str, text: str) -> dict[str, Any]:
 
 
 def run(args: argparse.Namespace) -> dict[str, LatencySummary]:
-    """Executa aquecimento + medição; retorna os resumos por medida."""
+    """Executa aquecimento + medição; retorna os resumos por medida.
+
+    Com `--concurrency N`, N clientes enviam requisições ao mesmo tempo
+    (cada um com sua fatia dos textos). A latência é medida por requisição;
+    a vazão real (`wall_throughput_rps`) vem do tempo total de parede.
+    """
     texts = sample_texts(args.data, args.text_column, args.requests, args.seed)
     for text in texts[: args.warmup]:
         post_predict(args.url, text)
@@ -68,7 +84,13 @@ def run(args: argparse.Namespace) -> dict[str, LatencySummary]:
     def call(text: str) -> None:
         server_ms.append(post_predict(args.url, text)["inference_ms"])
 
-    client_ms = measure(call, texts)
+    slices = [texts[i :: args.concurrency] for i in range(args.concurrency)]
+    start = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+        client_ms = [
+            ms for part in pool.map(lambda t: measure(call, t), slices) for ms in part
+        ]
+    args.wall_throughput_rps = len(texts) / (time.perf_counter() - start)
     return {
         "client_latency": summarize(client_ms),
         "server_inference": summarize(server_ms),
@@ -83,6 +105,8 @@ def build_report(
         "scenario": args.label,
         "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "url": args.url,
+        "concurrency": args.concurrency,
+        "wall_throughput_rps": round(args.wall_throughput_rps, 1),
         "machine": f"{platform.system()} {platform.machine()}",
         **{name: summary.to_dict() for name, summary in summaries.items()},
     }
