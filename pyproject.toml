@@ -9,7 +9,9 @@ packages = [{ include = "triage", from = "src" }]
 
 # Dependências mínimas compartilhadas por treino e inferência.
 # pandas fica fora daqui: a inferência recebe listas de strings e não
-# precisa dele, então a imagem da API não o carrega.
+# precisa dele, então a imagem da API não o carrega. O onnxruntime é
+# compartilhado: serve o modelo otimizado na API e verifica a paridade da
+# exportação no treino.
 [tool.poetry.dependencies]
 python = ">=3.11,<3.13"
 scikit-learn = ">=1.5,<1.8"
@@ -18,10 +20,13 @@ joblib = ">=1.4,<2.0"
 pydantic = ">=2.8,<3.0"
 pydantic-settings = ">=2.4,<3.0"
 pyyaml = ">=6.0,<7.0"
+onnxruntime = ">=1.20,<2.0"
 
-# Usado apenas no pipeline de treino (leitura/avaliação do CSV).
+# Usado apenas no pipeline de treino (leitura/avaliação do CSV e exportação
+# do modelo para ONNX).
 [tool.poetry.group.training.dependencies]
 pandas = ">=2.2,<3.0"
+skl2onnx = ">=1.18,<2.0"
 
 # Busca de hiperparâmetros — etapa offline, fora das imagens Docker.
 [tool.poetry.group.tuning.dependencies]
