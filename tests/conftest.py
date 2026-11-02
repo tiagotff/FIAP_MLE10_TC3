@@ -159,6 +159,7 @@ def fake_predictor():
     from triage.inference.predictor import Prediction
 
     class FakePredictor:
+        backend = "fake"
         model_version = "test-version"
         metadata = {
             "classifier": "logistic_regression",

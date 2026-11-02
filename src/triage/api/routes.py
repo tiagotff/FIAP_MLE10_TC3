@@ -120,10 +120,11 @@ def ready(predictor: PredictorDep) -> ReadinessResponse:
     "/model", response_model=ModelInfoResponse, responses=_UNAVAILABLE, tags=["infra"]
 )
 def model_info(predictor: PredictorDep) -> ModelInfoResponse:
-    """Versão, regra de decisão e métricas de teste do modelo em uso."""
+    """Versão, backend, regra de decisão e métricas de teste do modelo em uso."""
     metadata = predictor.metadata
     return ModelInfoResponse(
         model_version=predictor.model_version,
+        backend=predictor.backend,
         classifier=str(metadata.get("classifier", "unknown")),
         labels=list(metadata.get("labels", [])),
         decision={k: v for k, v in metadata.get("decision", {}).items()},

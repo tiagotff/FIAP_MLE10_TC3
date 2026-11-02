@@ -80,6 +80,7 @@ class ModelInfoResponse(BaseModel):
     """Informações do modelo em produção."""
 
     model_version: str
+    backend: str = Field(description="Backend de inferência: sklearn ou onnx")
     classifier: str
     labels: list[str]
     decision: dict[str, Any]

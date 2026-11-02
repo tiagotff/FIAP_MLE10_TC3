@@ -45,9 +45,11 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.predictor = predictor_factory()
-        version = getattr(app.state.predictor, "model_version", "nenhum")
-        app.state.metrics.set_model(version, settings.inference_backend)
-        logger.info("Modelo carregado: %s", version)
+        predictor = app.state.predictor
+        version = getattr(predictor, "model_version", "nenhum")
+        backend = getattr(predictor, "backend", settings.inference_backend)
+        app.state.metrics.set_model(version, backend)
+        logger.info("Modelo carregado: %s (backend %s)", version, backend)
         yield
         app.state.predictor = None
 

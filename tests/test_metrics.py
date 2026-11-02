@@ -36,7 +36,7 @@ def test_metrics_exposes_model_version(client):
             samples,
             "triage_model_info",
             model_version="test-version",
-            backend="sklearn",
+            backend="fake",
         )
         == 1.0
     )

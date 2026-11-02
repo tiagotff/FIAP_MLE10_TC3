@@ -30,6 +30,7 @@ def test_ready_with_model(client):
 
 def test_model_info(client):
     body = client.get("/model").json()
+    assert body["backend"] == "fake"
     assert body["classifier"] == "logistic_regression"
     assert body["decision"]["policy"] == "threshold"
     assert body["test_metrics"] == {"accuracy": 0.6, "f1_macro": 0.5}
