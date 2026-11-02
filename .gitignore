@@ -16,6 +16,9 @@ venv/
 /models/*
 !/models/.gitkeep
 
+# Artefatos intermediários das execuções do pipeline de retreino
+/artifacts/
+
 # Env
 .env
 !.env.example

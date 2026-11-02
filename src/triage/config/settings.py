@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     model_filename: str = "model.joblib"
     metadata_filename: str = "metadata.json"
     reports_dir: Path = Path("reports")
+    artifacts_dir: Path = Path("artifacts")
     data_config_path: Path = Path("configs/data.yaml")
     model_config_path: Path = Path("configs/model.yaml")
     training_config_path: Path = Path("configs/training.yaml")

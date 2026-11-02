@@ -43,12 +43,23 @@ class DecisionConfig(BaseModel):
     target_recall: float = Field(default=0.85, gt=0.0, le=1.0)
 
 
+class QualityGateConfig(BaseModel):
+    """Métricas mínimas, no teste, para um modelo ser publicado.
+
+    As chaves são nomes de métricas da avaliação com a política de decisão
+    (ex.: `f1_macro`, `recall_urgente`); os valores são os mínimos aceitos.
+    """
+
+    min_test_metrics: dict[str, float] = {}
+
+
 class TrainingConfig(BaseModel):
     """Configuração completa do protocolo de treino."""
 
     split: SplitConfig
     calibration: CalibrationConfig = CalibrationConfig()
     decision: DecisionConfig = DecisionConfig()
+    quality_gate: QualityGateConfig = QualityGateConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> "TrainingConfig":

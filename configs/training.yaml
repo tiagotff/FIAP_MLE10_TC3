@@ -27,3 +27,11 @@ decision:
   # Recall mínimo desejado para a classe positiva na validação; o limiar
   # escolhido é o MAIOR que ainda atinge esse recall (melhor precisão).
   target_recall: 0.85
+
+# Critério para publicar um modelo retreinado (pipeline/DAG): todas as
+# métricas de teste, com a política de decisão, precisam atingir o mínimo.
+# Um retreino que piore o modelo falha aqui e não substitui o atual.
+quality_gate:
+  min_test_metrics:
+    f1_macro: 0.74
+    recall_urgente: 0.80

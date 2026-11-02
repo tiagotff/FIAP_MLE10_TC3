@@ -104,3 +104,12 @@ def test_project_training_config_is_valid():
     assert config.decision.policy == "threshold"
     assert config.split.train == pytest.approx(0.70)
     assert config.calibration.cv_folds == 5
+
+
+def test_quality_gate_config_defaults_and_project_values():
+    from pathlib import Path
+
+    config = TrainingConfig.model_validate({"split": {"validation": 0.1, "test": 0.1}})
+    assert config.quality_gate.min_test_metrics == {}
+    project = TrainingConfig.from_yaml(Path("configs/training.yaml"))
+    assert set(project.quality_gate.min_test_metrics) == {"f1_macro", "recall_urgente"}

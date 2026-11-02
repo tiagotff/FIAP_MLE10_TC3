@@ -144,6 +144,7 @@ def project_settings(
         data_raw_dir=raw_dir,
         models_dir=tmp_path / "models",
         reports_dir=tmp_path / "reports",
+        artifacts_dir=tmp_path / "artifacts",
         data_config_path=tmp_path / "data.yaml",
         model_config_path=tmp_path / "model.yaml",
         training_config_path=tmp_path / "training.yaml",

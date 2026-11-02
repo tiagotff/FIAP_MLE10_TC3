@@ -19,6 +19,7 @@ htmlcov
 data
 models
 reports
+artifacts
 
 # Fora do escopo da imagem
 tests
