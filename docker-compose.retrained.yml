@@ -9,8 +9,10 @@
 #   docker compose -f docker-compose.yml -f docker-compose.retrained.yml restart api
 #
 # O painel "Modelo em uso" do Grafana mostra a versão servida.
-# Requer ./models/model.joblib e ./models/metadata.json (gerados pela DAG
-# ou por `poetry run python -m triage.training.train`).
+# Requer ./models/model.joblib, ./models/model.onnx e ./models/metadata.json,
+# gerados pela DAG ou, localmente, por:
+#   poetry run python -m triage.training.train
+#   poetry run python -m triage.optimization.export_onnx
 
 services:
   api:

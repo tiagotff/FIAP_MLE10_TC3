@@ -24,6 +24,9 @@ services:
       - "8000:8000"
     environment:
       LOG_LEVEL: INFO
+      # Backend otimizado (padrão da imagem); troque por sklearn para servir
+      # o modelo original e comparar no dashboard.
+      INFERENCE_BACKEND: onnx
     # O healthcheck (GET /ready) vem do Dockerfile.
     restart: unless-stopped
 

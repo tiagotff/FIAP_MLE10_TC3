@@ -2,7 +2,8 @@
 #
 # Multi-stage:
 #   1. poetry-base -> Poetry + manifestos de dependências (camada cacheável)
-#   2. trainer     -> baixa o corpus (com checksum) e treina o modelo
+#   2. trainer     -> baixa o corpus (com checksum), treina o modelo e o
+#                     exporta para ONNX (com verificação de paridade)
 #   3. api-deps    -> venv só com o necessário para servir (sem pandas)
 #   4. runtime     -> imagem final enxuta, usuário não-root, sem Poetry
 #
@@ -33,7 +34,9 @@ COPY configs ./configs
 COPY src ./src
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app/src"
-RUN python -m triage.data.download && python -m triage.training.train
+RUN python -m triage.data.download \
+    && python -m triage.training.train \
+    && python -m triage.optimization.export_onnx
 
 # ---- Stage 3: dependências da API ----
 FROM poetry-base AS api-deps
@@ -55,6 +58,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app/src" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    INFERENCE_BACKEND=onnx \
     PORT=8000
 
 USER app
@@ -63,7 +67,9 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/ready', timeout=2)"
 
-# $PORT segue a convenção do Cloud Run (padrão local: 8000). O access log
+# INFERENCE_BACKEND=onnx serve o modelo otimizado (ONNX Runtime); use
+# INFERENCE_BACKEND=sklearn para o modelo original. $PORT segue a convenção
+# do Cloud Run (padrão local: 8000). O access log
 # do uvicorn é desligado porque a aplicação registra o próprio, com
 # request-id e sem conteúdo dos laudos.
 CMD ["sh", "-c", "exec uvicorn triage.api.main:app --host 0.0.0.0 --port ${PORT} --no-access-log"]
