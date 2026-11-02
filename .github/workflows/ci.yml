@@ -141,9 +141,32 @@ jobs:
           echo "$response"
           echo "$response" | grep -q '"label":"urgente"'
 
+      - name: Backends ONNX (padrão) e scikit-learn respondem igual
+        run: |
+          docker run -d --name triage-api-sklearn -p 8001:8000 \
+            -e INFERENCE_BACKEND=sklearn triage-api:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8001/ready; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/model | grep -q '"backend":"onnx"'
+          curl -fsS http://localhost:8001/model | grep -q '"backend":"sklearn"'
+          payload='{"texts": ["Acute ischemic stroke with hemiparesis and aphasia.", "Gastric ulcer at endoscopy without active bleeding.", "Routine follow-up with stable general condition."]}'
+          labels() {
+            curl -fsS -X POST "http://localhost:$1/predict/batch" \
+              -H "Content-Type: application/json" -d "$payload" \
+              | python3 -c "import json, sys; print([p['label'] for p in json.load(sys.stdin)['predictions']])"
+          }
+          onnx=$(labels 8000)
+          sklearn=$(labels 8001)
+          echo "onnx: $onnx | sklearn: $sklearn"
+          test "$onnx" = "$sklearn"
+
       - name: Logs do container
         if: always()
-        run: docker logs triage-api || true
+        run: |
+          docker logs triage-api || true
+          docker logs triage-api-sklearn || true
 
   monitoring:
     name: Stack de monitoramento (Prometheus + Grafana)
