@@ -637,6 +637,16 @@ A fase de drift reproduz o risco descrito no Model Card: sem reconhecer os termo
 modelo empurra laudos para `normal`, com confiança baixa — e o alerta dispara antes que
 qualquer rótulo revisado estivesse disponível.
 
+Dashboard no Docker Desktop (Windows), durante a fase de drift. A cobertura de vocabulário
+caiu para 52% e segue descendo, e o alerta `TriageVocabularyDrift` aparece como
+*pending*:
+
+![Dashboard do Grafana durante a fase de drift](docs/images/grafana_dashboard_drift.png)
+
+Um minuto depois, o alerta passa a *firing* no Prometheus:
+
+![Alerta TriageVocabularyDrift disparado no Prometheus](docs/images/prometheus_alerta_drift.png)
+
 ### Servindo o modelo retreinado
 
 Por padrão, a API serve o modelo treinado no build da imagem. Para servir o modelo
