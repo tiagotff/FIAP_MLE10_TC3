@@ -23,6 +23,7 @@ def test_pipeline_order_matches_dag_contract():
         "prepare",
         "calibrate",
         "train",
+        "export_onnx",
         "evaluate",
         "quality_gate",
         "publish",
@@ -43,11 +44,15 @@ def test_pipeline_publishes_model_loadable_by_api(project_settings):
     assert project_settings.model_path.exists()
     archive = project_settings.models_dir / "archive" / version
     assert (archive / "model.joblib").exists()
+    assert (archive / "model.onnx").exists()
+    assert project_settings.onnx_path.exists()
     metadata = load_metadata(project_settings.metadata_path)
     assert metadata["pipeline_run_id"] == RUN_ID
     assert set(metadata["metrics"]) == {"cross_validation", "test"}
-    predictor = load_predictor(project_settings)
-    assert predictor.model_version == version
+    assert metadata["onnx"]["parity"]["passed"]
+    for backend in ("sklearn", "onnx"):
+        predictor = load_predictor(project_settings, backend=backend)
+        assert predictor.model_version == version
 
 
 def test_pipeline_matches_cli_training(project_settings):
@@ -65,7 +70,7 @@ def test_quality_gate_blocks_publication(project_settings, training_config_dict)
     project_settings.training_config_path.write_text(
         yaml.safe_dump(training_config_dict), "utf-8"
     )
-    for _, step in PIPELINE[:4]:
+    for _, step in PIPELINE[:5]:
         step(project_settings, RUN_ID)
     with pytest.raises(QualityGateError):
         steps.quality_gate_step(project_settings, RUN_ID)
@@ -73,10 +78,12 @@ def test_quality_gate_blocks_publication(project_settings, training_config_dict)
 
 
 def test_steps_write_artifacts_in_run_directory(project_settings):
-    for _, step in PIPELINE[:4]:
+    for _, step in PIPELINE[:5]:
         step(project_settings, RUN_ID)
     paths = run_paths(project_settings.artifacts_dir, RUN_ID)
     assert paths.model.exists()
+    assert paths.onnx.exists()
+    assert load_metadata(paths.onnx_report)["parity"]["passed"]
     assert paths.metrics.exists()
     assert "decision" in load_metadata(paths.decision)
 

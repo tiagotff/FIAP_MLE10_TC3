@@ -1,8 +1,9 @@
 """Retreino do classificador de urgência de laudos.
 
 Fluxo: download -> preparação (deduplicação + divisão 70/15/15) ->
-calibração do limiar (validação cruzada) -> treino -> avaliação no teste ->
-quality gate -> publicação do modelo.
+calibração do limiar (validação cruzada) -> treino -> exportação para ONNX
+(com verificação de paridade) -> avaliação no teste -> quality gate ->
+publicação do modelo (joblib + ONNX).
 
 As tasks de ML rodam com `@task.external_python` num ambiente virtual
 próprio (`TRIAGE_PYTHON`), instalado a partir do mesmo `poetry.lock` da
@@ -102,6 +103,17 @@ def triage_retraining() -> None:
         return train_step(get_settings(), run_name)
 
     @task.external_python(python=TRIAGE_PYTHON, **EXTERNAL_OPTIONS)
+    def export_onnx(run_name: str) -> dict:
+        """Exporta para ONNX e falha se o modelo não reproduzir o original."""
+        import logging
+
+        from triage.config.settings import get_settings
+        from triage.pipeline.steps import export_onnx_step
+
+        logging.basicConfig(level="INFO")
+        return export_onnx_step(get_settings(), run_name)
+
+    @task.external_python(python=TRIAGE_PYTHON, **EXTERNAL_OPTIONS)
     def evaluate_model(run_name: str) -> dict:
         """Avalia o modelo no conjunto de teste."""
         import logging
@@ -141,10 +153,12 @@ def triage_retraining() -> None:
     download_data() >> prepared
     calibrated = calibrate_threshold(run_name)
     trained = train_model(run_name)
+    exported = export_onnx(run_name)
     evaluated = evaluate_model(run_name)
     approved = quality_gate(run_name)
     published = publish_model(run_name)
-    prepared >> calibrated >> trained >> evaluated >> approved >> published
+    prepared >> calibrated >> trained >> exported >> evaluated
+    evaluated >> approved >> published
 
 
 triage_retraining()

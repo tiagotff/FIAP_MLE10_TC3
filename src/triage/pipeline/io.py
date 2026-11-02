@@ -43,6 +43,16 @@ class RunPaths:
         return self.root / "model.joblib"
 
     @property
+    def onnx(self) -> Path:
+        """Modelo exportado para ONNX (ainda não publicado)."""
+        return self.root / "model.onnx"
+
+    @property
+    def onnx_report(self) -> Path:
+        """Resultado da verificação de paridade da exportação ONNX."""
+        return self.root / "onnx_export.json"
+
+    @property
     def metrics(self) -> Path:
         """Métricas de teste do modelo treinado."""
         return self.root / "test_metrics.json"

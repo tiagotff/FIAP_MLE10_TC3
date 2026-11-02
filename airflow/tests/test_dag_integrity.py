@@ -21,6 +21,7 @@ ML_TASKS = [
     "prepare_data",
     "calibrate_threshold",
     "train_model",
+    "export_onnx",
     "evaluate_model",
     "quality_gate",
     "publish_model",
@@ -55,7 +56,9 @@ def test_tasks_run_in_pipeline_order(dag):
 
 def test_publish_depends_on_quality_gate(dag):
     upstream = dag.get_task("publish_model").get_flat_relative_ids(upstream=True)
-    assert {"quality_gate", "evaluate_model", "train_model"} <= set(upstream)
+    assert {"quality_gate", "evaluate_model", "export_onnx", "train_model"} <= set(
+        upstream
+    )
 
 
 def test_ml_tasks_use_project_environment(dag):

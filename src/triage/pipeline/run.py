@@ -24,6 +24,7 @@ PIPELINE: tuple[tuple[str, RunStep], ...] = (
     ("prepare", steps.prepare_step),
     ("calibrate", steps.calibrate_step),
     ("train", steps.train_step),
+    ("export_onnx", steps.export_onnx_step),
     ("evaluate", steps.evaluate_step),
     ("quality_gate", steps.quality_gate_step),
     ("publish", steps.publish_step),

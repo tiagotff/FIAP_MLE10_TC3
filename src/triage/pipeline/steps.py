@@ -5,8 +5,8 @@ que a etapa anterior gravou em `artifacts/runs/<run_id>/` e devolve um
 resumo pequeno e serializável (adequado para XCom no Airflow). Assim cada
 etapa pode rodar em um processo separado e ser repetida individualmente.
 
-Ordem: download -> prepare -> calibrate -> train -> evaluate ->
-quality_gate -> publish.
+Ordem: download -> prepare -> calibrate -> train -> export_onnx ->
+evaluate -> quality_gate -> publish.
 """
 
 import logging
@@ -25,6 +25,7 @@ from triage.data.schema import DataConfig
 from triage.data.split import DatasetSplits
 from triage.inference.policy import build_policy
 from triage.models.factory import ModelConfig
+from triage.optimization.export_onnx import export_onnx, onnx_metadata
 from triage.pipeline.gate import enforce_gate, evaluate_gate
 from triage.pipeline.io import (
     SPLIT_NAMES,
@@ -130,6 +131,22 @@ def train_step(settings: Settings, run_id: str) -> str:
     return str(save_model(model, paths.model))
 
 
+def export_onnx_step(settings: Settings, run_id: str) -> dict[str, Any]:
+    """Exporta o modelo treinado para ONNX, com paridade em todo o corpus.
+
+    Falha (OnnxExportError) se o modelo ONNX não reproduzir o original;
+    nesse caso nada é publicado.
+    """
+    paths = _paths(settings, run_id)
+    model = joblib.load(paths.model)
+    splits = _load_splits(paths)
+    texts = [text for name in SPLIT_NAMES for text in getattr(splits, name).texts]
+    report = export_onnx(model, paths.onnx, texts)
+    block = onnx_metadata(report, paths.onnx)
+    save_json(block, paths.onnx_report)
+    return report.to_dict()
+
+
 def evaluate_step(settings: Settings, run_id: str) -> dict[str, float]:
     """Avalia o modelo treinado no teste, com argmax e com a política."""
     configs = ProjectConfigs.load(settings)
@@ -168,7 +185,11 @@ def build_run_metadata(settings: Settings, run_id: str) -> dict[str, Any]:
         load_metadata(paths.data_summary),
         configs.data.labels,
     )
-    return {**metadata, "pipeline_run_id": run_id}
+    return {
+        **metadata,
+        "onnx": load_metadata(paths.onnx_report),
+        "pipeline_run_id": run_id,
+    }
 
 
 def _atomic_copy(source: Path, target: Path) -> None:
@@ -188,9 +209,16 @@ def publish_step(settings: Settings, run_id: str) -> str:
     save_json(metadata, paths.metadata)
     archive = settings.models_dir / "archive" / metadata["model_version"]
     archive.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(paths.model, archive / settings.model_filename)
-    shutil.copyfile(paths.metadata, archive / settings.metadata_filename)
-    _atomic_copy(paths.model, settings.model_path)
-    _atomic_copy(paths.metadata, settings.metadata_path)
+    artifacts = [
+        (paths.model, settings.model_filename, settings.model_path),
+        (paths.onnx, settings.onnx_filename, settings.onnx_path),
+        (paths.metadata, settings.metadata_filename, settings.metadata_path),
+    ]
+    for source, name, _ in artifacts:
+        shutil.copyfile(source, archive / name)
+    # Metadados por último: a versão anunciada só muda quando os dois
+    # modelos (joblib e ONNX) já foram trocados.
+    for source, _, target in artifacts:
+        _atomic_copy(source, target)
     logger.info("Modelo %s publicado em %s", metadata["model_version"], archive)
     return str(metadata["model_version"])
