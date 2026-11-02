@@ -1,7 +1,9 @@
 name: CI/CD
 
 # lint -> testes (Python 3.11 e 3.12) + integridade da DAG -> build e smoke
-# test das imagens Docker -> publicação da imagem da API no GHCR (só main).
+# test das imagens Docker + stack de monitoramento (promtool, compose com
+# API/Prometheus/Grafana e tráfego) -> publicação da imagem da API no GHCR
+# (só main).
 
 on:
   push:
@@ -143,6 +145,48 @@ jobs:
         if: always()
         run: docker logs triage-api || true
 
+  monitoring:
+    name: Stack de monitoramento (Prometheus + Grafana)
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar configuração e regras do Prometheus (promtool)
+        run: |
+          image=$(docker compose config --images | grep prom/prometheus)
+          docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool "$image" check config /etc/prometheus/prometheus.yml
+          docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool "$image" test rules /etc/prometheus/rules_test.yml
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build da imagem da API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: triage-api:latest
+          cache-from: type=gha,scope=api
+
+      - name: Subir API, Prometheus e Grafana
+        run: docker compose up -d --no-build --wait api prometheus grafana
+
+      - name: Gerar tráfego
+        run: docker compose run --rm traffic --plan normal:45,errors:15 --rps 10
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verificar métricas, regras e dashboard
+        run: python scripts/smoke_monitoring.py --timeout 120
+
+      - name: Logs da stack
+        if: failure()
+        run: docker compose logs --no-color
+
   docker-airflow:
     name: Build da imagem do Airflow
     needs: [test, dag]
@@ -178,7 +222,7 @@ jobs:
 
   publish:
     name: Publicar imagem da API (GHCR)
-    needs: [docker-api, docker-airflow]
+    needs: [docker-api, docker-airflow, monitoring]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
