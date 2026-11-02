@@ -1,0 +1,55 @@
+# Airflow local para o pipeline de retreino (modo standalone: API/UI,
+# scheduler, dag-processor e triggerer num único container, com SQLite).
+#
+#   docker compose -f airflow/docker-compose.yml up -d --build
+#   UI: http://localhost:8080  (sem login: todos os usuários são admin)
+#
+# Dados, configurações e modelos são montados a partir do repositório.
+# O modelo publicado pela DAG vai para ./models — o mesmo diretório que a
+# API monta — então um retreino aprovado passa a ser servido após
+# reiniciar a API.
+
+name: triage-airflow
+
+services:
+  airflow:
+    build:
+      context: ..
+      dockerfile: airflow/Dockerfile
+    image: triage-airflow:latest
+    command: standalone
+    # Linux: exporte AIRFLOW_UID=$(id -u) para os arquivos gerados nos
+    # volumes ficarem com o seu usuário. No Windows/macOS não é necessário.
+    user: "${AIRFLOW_UID:-50000}:0"
+    ports:
+      - "8080:8080"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      # Configurações do projeto (lidas por triage.config.Settings)
+      DATA_RAW_DIR: /opt/triage/data/raw
+      MODELS_DIR: /opt/triage/models
+      ARTIFACTS_DIR: /opt/triage/artifacts
+      REPORTS_DIR: /opt/triage/reports
+      DATA_CONFIG_PATH: /opt/triage/configs/data.yaml
+      MODEL_CONFIG_PATH: /opt/triage/configs/model.yaml
+      TRAINING_CONFIG_PATH: /opt/triage/configs/training.yaml
+      TUNING_CONFIG_PATH: /opt/triage/configs/tuning.yaml
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ../configs:/opt/triage/configs:ro
+      - ../data:/opt/triage/data
+      - ../models:/opt/triage/models
+      - ../artifacts:/opt/triage/artifacts
+      - airflow-home:/opt/airflow
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  airflow-home:
