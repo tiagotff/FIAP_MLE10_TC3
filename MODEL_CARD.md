@@ -178,16 +178,23 @@ demais; ela tem o menor F1 (0,622) e é a classe que mais recebe alarmes falsos 
 - **Viés:** o corpus não traz dados demográficos, então não foi possível avaliar diferenças
   de desempenho entre grupos de pacientes. Essa avaliação é necessária antes de uso real.
 
-## Monitoramento recomendado
+## Monitoramento
 
-- **Distribuição das predições** (proporção de `normal`/`atencao`/`urgente` ao longo do
-  tempo): mudanças bruscas indicam drift nos dados de entrada.
-- **Cobertura de vocabulário** (fração de termos do laudo presentes no vocabulário do
-  TF-IDF): queda indica textos fora do domínio de treino — por exemplo, laudos em outro
-  idioma, como mostrado acima.
-- **Latência p99 e taxa de erro** da API.
-- **Recall de `urgente` em amostras revisadas** por especialistas, para confirmar o
-  desempenho em produção.
+A API expõe métricas Prometheus e a stack local (API + Prometheus + Grafana) traz
+dashboard e alertas (ver [README](README.md#monitoramento-prometheus--grafana)). Sinais
+monitorados e limites de alerta:
+
+| Sinal | Referência (teste) | Alerta |
+|---|---|---|
+| **Cobertura de vocabulário** (fração dos termos do laudo no vocabulário do TF-IDF) | média ~97%; 1% dos laudos abaixo de 87,5% | média abaixo de 80% por 2 min — textos fora do domínio, como laudos em português |
+| **Distribuição das predições** | ~43% `urgente` | `urgente` fora de 28%–58% por 5 min |
+| **Confiança média** por rótulo | ~0,74–0,81 | acompanhada no dashboard |
+| **Latência p99** de `/predict` | 2–7 ms local; ~31 ms no Docker Desktop | acima de 100 ms por 2 min |
+| **Taxa de erro 5xx** | 0% | acima de 5% por 2 min |
+
+Esses sinais não precisam de rótulos, então funcionam em tempo real. Eles indicam
+**quando** desconfiar do modelo, mas não medem o acerto: para isso, continua necessário
+acompanhar o **recall de `urgente` em amostras revisadas** por especialistas.
 
 ## Reprodutibilidade
 

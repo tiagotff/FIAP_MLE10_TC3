@@ -15,7 +15,8 @@ de retreino, monitoramento e otimização de latência.
 Sequência única, do zero, para quem acabou de clonar o repositório. Cada comando assume
 que você está na pasta raiz do projeto e usa **Git Bash** (Linux/macOS: mesmos
 comandos). Há dois caminhos para rodar a API — **local com Poetry** ou **somente
-Docker** — e um terceiro para o **retreino orquestrado pelo Airflow**.
+Docker** —, um terceiro para o **retreino orquestrado pelo Airflow** e um quarto para a
+**stack de monitoramento**.
 
 > Pré-requisitos: Python 3.11 ou 3.12, [Poetry](https://python-poetry.org/) 2.x e
 > Docker. Para o caminho só com Docker, basta o Docker.
@@ -141,6 +142,29 @@ docker compose -f airflow/docker-compose.yml down
 
 Detalhes em [Pipeline de retreino (Airflow)](#pipeline-de-retreino-airflow).
 
+### Opção D — Monitoramento (API + Prometheus + Grafana)
+
+```bash
+# 1. Subir a stack (constrói a imagem da API na primeira vez; leva alguns minutos)
+docker compose up -d --build
+
+# 2. Gerar tráfego: 3 min de laudos normais e 5 min de laudos em português (drift)
+docker compose run --rm traffic --plan normal:180,drift:300
+
+# 3. Acompanhar (em outra aba do navegador, enquanto o tráfego roda)
+#    Grafana:    http://localhost:3000   (dashboard abre direto; edição: admin/admin)
+#    Prometheus: http://localhost:9090/alerts
+#    Métricas:   http://localhost:8000/metrics
+
+# 4. (Opcional) Verificar a stack inteira automaticamente (só usa a biblioteca padrão)
+poetry run python scripts/smoke_monitoring.py
+
+# 5. Encerrar (o -v apaga também o histórico do Prometheus e do Grafana)
+docker compose down -v
+```
+
+Detalhes em [Monitoramento (Prometheus + Grafana)](#monitoramento-prometheus--grafana).
+
 > ⚠️ **Windows:** se `poetry env use 3.12` falhar, aponte o executável diretamente:
 > `poetry env use "$(py -3.12 -c 'import sys; print(sys.executable)')"`. Se o `poetry`
 > apresentar erros de importação ao rodar qualquer comando, reinstale-o com
@@ -162,6 +186,7 @@ Detalhes em [Pipeline de retreino (Airflow)](#pipeline-de-retreino-airflow).
 - [Latência baseline](#latência-baseline)
 - [CI/CD (GitHub Actions)](#cicd-github-actions)
 - [Pipeline de retreino (Airflow)](#pipeline-de-retreino-airflow)
+- [Monitoramento (Prometheus + Grafana)](#monitoramento-prometheus--grafana)
 - [Estrutura do repositório](#estrutura-do-repositório)
 - [Como executar](#como-executar)
 - [API](#api)
@@ -443,8 +468,10 @@ flowchart LR
     D --> DA
     T --> DF["docker-airflow<br/>build + validação"]
     D --> DF
+    T --> M["monitoring<br/>promtool + compose<br/>API, Prometheus, Grafana"]
     DA --> P["publish<br/>imagem no GHCR<br/>(só push na main)"]
     DF --> P
+    M --> P
 ```
 
 | Job | O que garante |
@@ -454,6 +481,7 @@ flowchart LR
 | `dag` | A DAG é importada sem erros e mantém as tasks e a ordem esperadas (`airflow/tests`) |
 | `docker-api` | A imagem da API é construída (treinando o modelo), sobe, responde em `/ready` e classifica um laudo de infarto como `urgente` |
 | `docker-airflow` | A imagem do Airflow é construída, o venv de ML importa o projeto e a DAG é carregada dentro da imagem |
+| `monitoring` | Configuração e regras do Prometheus válidas e com testes unitários aprovados (`promtool`); a stack do Docker Compose sobe, recebe tráfego e passa no [smoke test de monitoramento](#verificação-automatizada) |
 | `publish` | Em push na `main`, publica a imagem da API em `ghcr.io/tiagotff/triage-api` com as tags `latest` e o SHA do commit |
 
 Os jobs seguintes só rodam se os anteriores passarem, e os builds Docker usam cache do
@@ -516,15 +544,134 @@ A DAG foi validada com `airflow dags test` e pelo scheduler do Airflow 3.3.2 (ex
 agendada e manual): as 8 tasks concluem com sucesso e o modelo publicado tem as mesmas
 métricas do treino manual (F1 macro 0,776; recall de `urgente` 0,847).
 
+## Monitoramento (Prometheus + Grafana)
+
+A API expõe métricas em `GET /metrics` (formato Prometheus, via `prometheus_client`). O
+[`docker-compose.yml`](docker-compose.yml) da raiz sobe a API, o Prometheus (coleta a cada
+5 s e avalia as regras) e o Grafana, já com datasource e dashboard provisionados:
+
+```mermaid
+flowchart LR
+    T["gerador de tráfego<br/>scripts/generate_traffic.py"] -->|POST /predict| A["API FastAPI<br/>:8000"]
+    P["Prometheus :9090<br/>recording rules + alertas"] -->|GET /metrics a cada 5 s| A
+    G["Grafana :3000<br/>dashboard provisionado"] -->|PromQL| P
+```
+
+### Métricas expostas
+
+| Métrica | Tipo | O que mostra |
+|---|---|---|
+| `triage_http_requests_total{method, route, status}` | Counter | Volume e erros por rota (template da rota, não a URL) |
+| `triage_http_request_duration_seconds{method, route}` | Histogram | Latência ponta a ponta; base do **p99** |
+| `triage_http_requests_in_progress` | Gauge | Requisições em andamento |
+| `triage_inference_duration_seconds{endpoint}` | Histogram | Tempo só do modelo, sem rede e serialização |
+| `triage_batch_size{endpoint}` | Histogram | Laudos por chamada de inferência |
+| `triage_predictions_total{label}` | Counter | Distribuição das predições (`normal`, `atencao`, `urgente`) |
+| `triage_prediction_confidence{label}` | Histogram | Confiança do rótulo previsto |
+| `triage_vocabulary_coverage_ratio` | Histogram | Fração dos termos do laudo que o modelo reconhece (drift) |
+| `triage_input_text_length_chars` | Histogram | Tamanho dos laudos recebidos |
+| `triage_model_info{model_version, backend}` | Gauge | Versão do modelo em uso |
+| `process_*` | — | CPU, memória e descritores do processo da API |
+
+**Por que cobertura de vocabulário?** Em produção não há rótulo verdadeiro na hora da
+predição, então a acurácia não pode ser monitorada em tempo real. A cobertura é um sinal
+de drift que não precisa de rótulos: laudos do domínio têm ~97% dos termos no vocabulário
+do TF-IDF (1% abaixo de 87,5%), enquanto laudos em português ficam em ~20–30% — o caso
+crítico descrito no [Model Card](MODEL_CARD.md#idioma-o-modelo-só-entende-inglês).
+
+As métricas usam o *template* da rota para manter a cardinalidade fixa, o próprio
+`/metrics` não entra nas séries de tráfego e **nenhuma métrica carrega texto de laudo**
+(LGPD). Cada instância da aplicação tem o próprio registry, o que isola os testes.
+
+### Dashboard
+
+O dashboard [`triage.json`](monitoring/grafana/dashboards/triage.json) abre como página
+inicial do Grafana, sem login, e atualiza a cada 10 s. São 17 painéis em quatro blocos:
+
+| Bloco | Painéis |
+|---|---|
+| Visão geral | Requisições/s · **latência p99 de `/predict`** · inferência p99 do modelo · taxa de erro 5xx · cobertura de vocabulário · modelo em uso |
+| Serviço | Latência p50/p95/**p99** com a linha do limite de alerta · requisições por rota e status |
+| Modelo | Inferência p99 por endpoint · tamanho médio dos lotes · memória e CPU do processo |
+| Predições e drift | Distribuição das predições · proporção por rótulo ao longo do tempo · cobertura de vocabulário · confiança média por rótulo · tamanho dos laudos · alertas ativos |
+
+### Regras e alertas
+
+As consultas do dashboard e dos alertas vêm das mesmas *recording rules*
+([`rules.yml`](monitoring/prometheus/rules.yml)) — o p99, por exemplo, tem uma única
+definição. Os alertas aparecem em <http://localhost:9090/alerts> e na tabela do dashboard:
+
+| Alerta | Condição | Severidade |
+|---|---|---|
+| `TriageApiDown` | Prometheus sem conseguir coletar a API por 1 min | critical |
+| `TriageHighErrorRate` | Mais de 5% de respostas 5xx por 2 min | critical |
+| `TriageHighP99Latency` | p99 de `/predict` acima de 100 ms por 2 min | warning |
+| `TriageVocabularyDrift` | Cobertura média (5 min) abaixo de 80% por 2 min | warning |
+| `TriageUrgentShareShift` | Proporção de `urgente` fora de 28%–58% por 5 min (esperado ~43%) | info |
+
+As regras têm testes unitários com o `promtool`
+([`rules_test.yml`](monitoring/prometheus/rules_test.yml)), executados no CI. Nesta stack
+local não há Alertmanager; em produção, ele faria o roteamento (e-mail, Slack, plantão).
+
+### Demonstração de drift
+
+O [gerador de tráfego](scripts/generate_traffic.py) executa um plano de fases
+`cenário:segundos` — `normal` (laudos do conjunto de teste, 20% em lote), `drift` (laudos em
+português) e `errors` (20% de requisições inválidas):
+
+```bash
+docker compose run --rm traffic --plan normal:180,drift:300
+# ou, com o ambiente Poetry: poetry run python scripts/generate_traffic.py --plan ...
+```
+
+Resultado medido com a stack local (15 req/s, 90 s normal → 30 s com erros → drift):
+
+| Sinal | Fase normal | Fase de drift (português) |
+|---|---|---|
+| Cobertura de vocabulário (média de 1 min) | 97% | **17%** |
+| Proporção de `normal` nas predições | 18% | **37%** |
+| Confiança média em `normal` | 0,74 | **0,47** |
+| Alerta `TriageVocabularyDrift` | inativo | *pending* em ~1 min, **disparado em ~3 min** |
+
+A fase de drift reproduz o risco descrito no Model Card: sem reconhecer os termos, o
+modelo empurra laudos para `normal`, com confiança baixa — e o alerta dispara antes que
+qualquer rótulo revisado estivesse disponível.
+
+### Servindo o modelo retreinado
+
+Por padrão, a API serve o modelo treinado no build da imagem. Para servir o modelo
+publicado pela [DAG de retreino](#pipeline-de-retreino-airflow) em `./models`, sem
+rebuild, combine o arquivo [`docker-compose.retrained.yml`](docker-compose.retrained.yml):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.retrained.yml up -d
+# após um novo retreino aprovado pelo quality gate:
+docker compose -f docker-compose.yml -f docker-compose.retrained.yml restart api
+```
+
+O painel **Modelo em uso** mostra a versão servida, fechando o ciclo
+retreino → publicação → serviço → monitoramento.
+
+### Verificação automatizada
+
+[`scripts/smoke_monitoring.py`](scripts/smoke_monitoring.py) confere a stack de ponta a
+ponta: API expondo métricas, Prometheus coletando a API com as regras carregadas e sem
+erro, recording rules com dados e, no Grafana, datasource saudável, dashboard provisionado
+e **todas as consultas dos painéis executando sem erro**. O CI roda essa verificação a cada
+push, depois de subir a stack com Docker Compose e gerar tráfego (job `monitoring`).
+
 ## Estrutura do repositório
 
 ```
-├── .github/workflows/ci.yml   # CI/CD: lint, testes, DAG, builds Docker e publicação
+├── .github/workflows/ci.yml   # CI/CD: lint, testes, DAG, builds, monitoramento e publicação
 ├── airflow/
 │   ├── dags/                  # DAG de retreino (triage_retraining)
 │   ├── tests/                 # testes de integridade da DAG
 │   ├── Dockerfile             # Airflow + venv de ML a partir do poetry.lock
 │   └── docker-compose.yml     # Airflow standalone local
+├── monitoring/
+│   ├── prometheus/            # coleta, recording rules, alertas e testes das regras
+│   └── grafana/               # datasource e dashboard provisionados
 ├── configs/
 │   ├── data.yaml              # fonte, checksums, mapeamento e escala de urgência
 │   ├── model.yaml             # melhor pipeline encontrado pelo Optuna (gerado)
@@ -535,7 +682,9 @@ métricas do treino manual (F1 macro 0,776; recall de `urgente` 0,847).
 │   ├── model/                 # dados, decisão e métricas (validação cruzada e teste)
 │   └── tuning/                # histórico de trials e resumo da busca
 ├── scripts/
-│   └── benchmark_api.py       # benchmark de latência do endpoint /predict
+│   ├── benchmark_api.py       # benchmark de latência do endpoint /predict
+│   ├── generate_traffic.py    # tráfego sintético (normal, drift, erros)
+│   └── smoke_monitoring.py    # verificação de ponta a ponta da stack de monitoramento
 ├── src/triage/
 │   ├── api/                   # FastAPI: app, rotas, schemas, middleware, erros, logging
 │   ├── benchmark/             # estatísticas de latência (p99 como referência)
@@ -543,10 +692,13 @@ métricas do treino manual (F1 macro 0,776; recall de `urgente` 0,847).
 │   ├── data/                  # download, deduplicação e divisão estratificada
 │   ├── inference/             # preditores e políticas de decisão (Strategy + Factory)
 │   ├── models/                # Factory de pipelines TF-IDF + classificador
+│   ├── monitoring/            # métricas Prometheus da API
 │   ├── pipeline/              # etapas do retreino, quality gate e execução sem Airflow
 │   └── training/              # Optuna, calibração OOF, treino, avaliação e artefatos
 ├── tests/                     # testes unitários e de API (pytest)
 ├── Dockerfile                 # multi-stage: treino → dependências → runtime
+├── docker-compose.yml         # API + Prometheus + Grafana (+ gerador de tráfego)
+├── docker-compose.retrained.yml  # serve o modelo publicado pela DAG (./models)
 ├── MODEL_CARD.md              # uso pretendido, métricas, limitações e ética do modelo
 └── pyproject.toml             # dependências (Poetry) e configuração do ruff/pytest
 ```
@@ -587,10 +739,11 @@ docker run -d --name triage-api -p 8000:8000 triage-api:latest
 curl http://localhost:8000/ready
 ```
 
-Para servir um modelo treinado fora do build, monte o diretório de artefatos:
+Para servir um modelo treinado fora do build, monte o diretório de artefatos (ou use o
+[`docker-compose.retrained.yml`](#servindo-o-modelo-retreinado)):
 
 ```bash
-docker run -d -p 8000:8000 -v "$(pwd)/models:/app/models" triage-api:latest
+docker run -d -p 8000:8000 -v "$(pwd)/models:/app/models:ro" triage-api:latest
 ```
 
 A imagem final roda com usuário não-root, tem `HEALTHCHECK` em `/ready` e não inclui
@@ -605,6 +758,7 @@ Poetry, pandas, Optuna, dados de treino nem dependências de desenvolvimento.
 | `GET` | `/model` | Versão, classificador, regra de decisão (limiar) e métricas de teste |
 | `POST` | `/predict` | Classifica a urgência de um laudo |
 | `POST` | `/predict/batch` | Classifica até 64 laudos em uma chamada, preservando a ordem |
+| `GET` | `/metrics` | Métricas no formato Prometheus (ver [Monitoramento](#monitoramento-prometheus--grafana)) |
 | `GET` | `/docs` | Swagger UI |
 
 Exemplo:
@@ -652,6 +806,9 @@ classe tenha probabilidade maior.
   - *Inversão de dependência:* a API depende do protocolo `UrgencyPredictor`, e o
     preditor recebe a `DecisionPolicy` por injeção. Trocar scikit-learn por ONNX Runtime,
     ou argmax por limiar, não toca nos endpoints.
+  - *Segregação de interfaces:* a cobertura de vocabulário é uma capacidade opcional
+    (`CoverageAware`), separada do contrato de predição: um backend sem vocabulário
+    exposto continua válido, apenas sem esse sinal de drift.
 - **Padrões de projeto:** Factory (classificadores, preditores, políticas), Strategy
   (backend de inferência e regra de decisão) e injeção de dependência do preditor na
   aplicação FastAPI.
@@ -679,7 +836,7 @@ poetry run pre-commit install    # hooks executados a cada commit
 |---|---|
 | 1. Decisão arquitetural e API inicial | Decisão de deploy (esta documentação), API FastAPI em Docker, latência baseline |
 | 2. CI/CD e pipeline de treino | [Workflow GitHub Actions](#cicd-github-actions) (lint → testes → DAG → builds → GHCR) e [DAG Airflow](#pipeline-de-retreino-airflow) de retreino com quality gate |
-| 3. Monitoramento | Métricas `prometheus_client`, Docker Compose (API + Prometheus + Grafana) e dashboard |
+| 3. Monitoramento | [Métricas `prometheus_client`](#monitoramento-prometheus--grafana) (latência p99, erros, predições, drift), Docker Compose (API + Prometheus + Grafana), dashboard de 17 painéis, alertas testados com `promtool` e gerador de tráfego |
 | 4. Otimização de latência | Modelo exportado para ONNX Runtime e comparação de latência |
 
 ## Licença e atribuição
