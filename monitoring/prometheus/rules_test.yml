@@ -139,3 +139,25 @@ tests:
             exp_annotations:
               summary: API de triagem fora do ar
               description: O Prometheus não consegue coletar api:8000 há 1 minuto.
+
+  # API ociosa depois de um período com tráfego: as razões ficam sem dados
+  # (e não 0%), então nenhum alerta de drift dispara por falta de tráfego.
+  - interval: 15s
+    input_series:
+      - series: triage_vocabulary_coverage_ratio_sum
+        values: "0+9.7x20 194x40"
+      - series: triage_vocabulary_coverage_ratio_count
+        values: "0+10x20 200x40"
+      - series: 'triage_predictions_total{label="normal"}'
+        values: "0+10x20 200x40"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TriageVocabularyDrift
+        exp_alerts: []
+    promql_expr_test:
+      - expr: triage:vocabulary_coverage:mean_5m
+        eval_time: 15m
+        exp_samples: []
+      - expr: triage:predictions:share_5m
+        eval_time: 15m
+        exp_samples: []

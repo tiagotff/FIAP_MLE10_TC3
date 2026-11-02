@@ -3,6 +3,9 @@
 # Recording rules: pré-calculam as séries usadas no dashboard e nos alertas
 # (p99 de latência, taxa de erro, distribuição das predições e cobertura de
 # vocabulário), para que ambos usem exatamente a mesma definição.
+# As razões dividem por `(denominador > 0)`: sem tráfego, a série some
+# ("sem dados") em vez de virar 0% — evita, por exemplo, uma cobertura de
+# vocabulário de 0% (falso drift) quando a API apenas está ociosa.
 #
 # Alertas: aparecem em http://localhost:9090/alerts. Não há Alertmanager
 # nesta stack local; em produção, ele faria o roteamento (e-mail, Slack...).
@@ -40,24 +43,24 @@ groups:
       - record: triage:http_errors:ratio_rate1m
         expr: >
           sum(rate(triage_http_requests_total{status=~"5.."}[1m]))
-          / clamp_min(sum(rate(triage_http_requests_total[1m])), 1e-9)
+          / (sum(rate(triage_http_requests_total[1m])) > 0)
 
       # --- Predições e drift ---
       - record: triage:predictions:share_5m
         expr: >
           sum by (label) (increase(triage_predictions_total[5m]))
-          / ignoring (label) group_left
-          clamp_min(sum(increase(triage_predictions_total[5m])), 1e-9)
+          / ignoring (label) group_left ()
+          (sum(increase(triage_predictions_total[5m])) > 0)
       - record: triage:predictions:count_5m
         expr: sum(increase(triage_predictions_total[5m]))
       - record: triage:vocabulary_coverage:mean_5m
         expr: >
           sum(rate(triage_vocabulary_coverage_ratio_sum[5m]))
-          / clamp_min(sum(rate(triage_vocabulary_coverage_ratio_count[5m])), 1e-9)
+          / (sum(rate(triage_vocabulary_coverage_ratio_count[5m])) > 0)
       - record: triage:vocabulary_coverage:low_share_5m
         expr: >
           sum(rate(triage_vocabulary_coverage_ratio_bucket{le="0.5"}[5m]))
-          / clamp_min(sum(rate(triage_vocabulary_coverage_ratio_count[5m])), 1e-9)
+          / (sum(rate(triage_vocabulary_coverage_ratio_count[5m])) > 0)
 
   - name: triage-alerts
     rules:
