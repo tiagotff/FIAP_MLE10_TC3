@@ -88,6 +88,35 @@ def fit(dataset: TextDataset, config: ModelConfig, seed: int) -> Pipeline:
     return model
 
 
+def _policies(policy: DecisionPolicy) -> dict[str, DecisionPolicy]:
+    return {"argmax": ArgmaxPolicy(), "decision_policy": policy}
+
+
+def cross_validation_metrics(
+    oof: OutOfFoldPredictions, policy: DecisionPolicy, labels: list[str]
+) -> dict[str, Any]:
+    """Métricas das predições out-of-fold, com argmax e com a política."""
+    return {
+        name: classification_metrics(
+            oof.labels,
+            labels_from_probas(oof.probas, oof.classes, rule),
+            labels,
+            "urgente",
+        )
+        for name, rule in _policies(policy).items()
+    }
+
+
+def holdout_metrics(
+    model: Pipeline, test: TextDataset, policy: DecisionPolicy, labels: list[str]
+) -> dict[str, Any]:
+    """Métricas no teste, com argmax e com a política."""
+    return {
+        name: evaluate(model, test, rule, labels)
+        for name, rule in _policies(policy).items()
+    }
+
+
 def evaluate_model(
     model: Pipeline,
     oof: OutOfFoldPredictions,
@@ -96,20 +125,9 @@ def evaluate_model(
     labels: list[str],
 ) -> dict[str, Any]:
     """Métricas de validação cruzada (OOF) e de teste, nas duas políticas."""
-    policies = {"argmax": ArgmaxPolicy(), "decision_policy": policy}
     return {
-        "cross_validation": {
-            name: classification_metrics(
-                oof.labels,
-                labels_from_probas(oof.probas, oof.classes, rule),
-                labels,
-                "urgente",
-            )
-            for name, rule in policies.items()
-        },
-        "test": {
-            name: evaluate(model, test, rule, labels) for name, rule in policies.items()
-        },
+        "cross_validation": cross_validation_metrics(oof, policy, labels),
+        "test": holdout_metrics(model, test, policy, labels),
     }
 
 
