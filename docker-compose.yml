@@ -1,0 +1,96 @@
+# Stack de execução e monitoramento: API + Prometheus + Grafana.
+#
+#   docker compose up -d --build
+#
+#   API         http://localhost:8000/docs     (métricas em /metrics)
+#   Prometheus  http://localhost:9090          (alertas em /alerts)
+#   Grafana     http://localhost:3000          (dashboard abre direto; admin/admin)
+#
+# Tráfego de demonstração (opcional), com laudos normais e, depois, em
+# português para disparar o alerta de drift:
+#
+#   docker compose run --rm traffic --plan normal:180,drift:300
+#
+# Para servir o modelo publicado pela DAG do Airflow (./models) no lugar do
+# modelo treinado no build, use também o arquivo docker-compose.retrained.yml.
+
+name: triage
+
+services:
+  api:
+    build: .
+    image: triage-api:latest
+    ports:
+      - "8000:8000"
+    environment:
+      LOG_LEVEL: INFO
+    # O healthcheck (GET /ready) vem do Dockerfile.
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.13.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Leitura sem login (demonstração local); edição exige o admin.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/triage.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+  # Gerador de tráfego: só sobe sob demanda (docker compose run --rm traffic).
+  traffic:
+    image: python:3.12-slim
+    profiles: ["tools"]
+    working_dir: /work
+    entrypoint: ["python", "scripts/generate_traffic.py", "--url", "http://api:8000"]
+    command: ["--plan", "normal:120"]
+    volumes:
+      - ./scripts/generate_traffic.py:/work/scripts/generate_traffic.py:ro
+      - ./data/raw:/work/data/raw:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  prometheus-data:
+  grafana-data:

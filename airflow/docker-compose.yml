@@ -6,8 +6,8 @@
 #
 # Dados, configurações e modelos são montados a partir do repositório.
 # O modelo publicado pela DAG vai para ./models — o mesmo diretório que a
-# API monta — então um retreino aprovado passa a ser servido após
-# reiniciar a API.
+# API monta com docker-compose.retrained.yml (raiz) —, então um retreino
+# aprovado passa a ser servido após reiniciar a API.
 
 name: triage-airflow
 

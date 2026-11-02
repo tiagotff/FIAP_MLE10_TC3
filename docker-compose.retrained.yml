@@ -1,0 +1,18 @@
+# Serve o modelo publicado pela DAG `triage_retraining` (./models) em vez do
+# modelo treinado durante o build da imagem.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.retrained.yml up -d
+#
+# Depois de um novo retreino aprovado pelo quality gate, basta reiniciar a
+# API para carregar a nova versão (sem rebuild):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.retrained.yml restart api
+#
+# O painel "Modelo em uso" do Grafana mostra a versão servida.
+# Requer ./models/model.joblib e ./models/metadata.json (gerados pela DAG
+# ou por `poetry run python -m triage.training.train`).
+
+services:
+  api:
+    volumes:
+      - ./models:/app/models:ro

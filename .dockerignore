@@ -25,4 +25,6 @@ artifacts
 tests
 scripts
 docs
+monitoring
+docker-compose*.yml
 .env
