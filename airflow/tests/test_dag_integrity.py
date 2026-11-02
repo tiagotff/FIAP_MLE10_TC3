@@ -62,4 +62,10 @@ def test_ml_tasks_use_project_environment(dag):
     for task_id in ML_TASKS:
         task = dag.get_task(task_id)
         assert type(task).__name__ == "_PythonExternalDecoratedOperator"
-        assert task.retries == 1
+
+
+def test_retries_only_on_non_deterministic_tasks(dag):
+    # O quality gate é determinístico: reprovar de novo não muda o resultado.
+    assert dag.get_task("quality_gate").retries == 0
+    for task_id in set(ML_TASKS) - {"quality_gate"}:
+        assert dag.get_task(task_id).retries == 1

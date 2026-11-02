@@ -112,7 +112,9 @@ def triage_retraining() -> None:
         logging.basicConfig(level="INFO")
         return evaluate_step(get_settings(), run_name)
 
-    @task.external_python(python=TRIAGE_PYTHON, **EXTERNAL_OPTIONS)
+    # Sem retry: o gate é determinístico (mesmas métricas, mesmo resultado).
+    # Repetir só atrasaria a falha de um modelo reprovado.
+    @task.external_python(python=TRIAGE_PYTHON, retries=0, **EXTERNAL_OPTIONS)
     def quality_gate(run_name: str) -> dict:
         """Reprova (falha a task) se alguma métrica ficar abaixo do mínimo."""
         import logging
