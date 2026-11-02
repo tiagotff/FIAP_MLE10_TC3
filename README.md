@@ -144,7 +144,10 @@ Detalhes em [Pipeline de retreino (Airflow)](#pipeline-de-retreino-airflow).
 > ⚠️ **Windows:** se `poetry env use 3.12` falhar, aponte o executável diretamente:
 > `poetry env use "$(py -3.12 -c 'import sys; print(sys.executable)')"`. Se o `poetry`
 > apresentar erros de importação ao rodar qualquer comando, reinstale-o com
-> `pipx uninstall poetry && pipx install poetry`.
+> `pipx uninstall poetry && pipx install poetry`. No Git Bash, comandos que passam um
+> caminho absoluto do container (ex.: `docker compose exec airflow /opt/triage/...`)
+> precisam do prefixo `MSYS_NO_PATHCONV=1`; sem ele, o Git Bash converte o caminho para
+> `C:/Program Files/Git/...` e o comando falha.
 
 ---
 
