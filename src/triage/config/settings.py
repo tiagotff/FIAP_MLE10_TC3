@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     data_raw_dir: Path = Path("data/raw")
     models_dir: Path = Path("models")
     model_filename: str = "model.joblib"
+    onnx_filename: str = "model.onnx"
     metadata_filename: str = "metadata.json"
     reports_dir: Path = Path("reports")
     artifacts_dir: Path = Path("artifacts")
@@ -36,6 +37,11 @@ class Settings(BaseSettings):
     def model_path(self) -> Path:
         """Caminho completo do artefato serializado do modelo."""
         return self.models_dir / self.model_filename
+
+    @property
+    def onnx_path(self) -> Path:
+        """Caminho do modelo exportado para ONNX (backend otimizado)."""
+        return self.models_dir / self.onnx_filename
 
     @property
     def metadata_path(self) -> Path:

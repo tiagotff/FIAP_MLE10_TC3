@@ -1,7 +1,7 @@
 """Preditores de urgência (padrão Strategy).
 
 A API depende apenas do protocolo `UrgencyPredictor`; o backend concreto
-(scikit-learn hoje, ONNX Runtime na etapa de otimização) é escolhido na
+(scikit-learn ou ONNX Runtime, ver `onnx_predictor`) é escolhido na
 inicialização, sem alterar os endpoints. A regra de decisão
 (`DecisionPolicy`) é injetada, e não embutida no backend.
 """
@@ -30,6 +30,7 @@ class Prediction:
 class UrgencyPredictor(Protocol):
     """Contrato mínimo de qualquer backend de inferência."""
 
+    backend: str
     model_version: str
     metadata: dict[str, Any]
 
@@ -88,6 +89,8 @@ def to_predictions(
 
 class SklearnPredictor:
     """Backend baseado no pipeline scikit-learn serializado com joblib."""
+
+    backend = "sklearn"
 
     def __init__(
         self,

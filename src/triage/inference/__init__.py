@@ -1,6 +1,7 @@
 """Backends de inferência e regras de decisão do classificador de urgência."""
 
 from triage.inference.loader import PREDICTOR_REGISTRY, load_predictor
+from triage.inference.onnx_predictor import OnnxPredictor
 from triage.inference.policy import (
     ArgmaxPolicy,
     DecisionPolicy,
@@ -13,6 +14,7 @@ __all__ = [
     "PREDICTOR_REGISTRY",
     "ArgmaxPolicy",
     "DecisionPolicy",
+    "OnnxPredictor",
     "Prediction",
     "SklearnPredictor",
     "ThresholdPolicy",
