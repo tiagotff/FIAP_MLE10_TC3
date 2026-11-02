@@ -1128,6 +1128,23 @@ pyyaml = ">=5.1"
 virtualenv = ">=20.10.0"
 
 [[package]]
+name = "prometheus-client"
+version = "0.26.0"
+description = "Python client for the Prometheus monitoring system."
+optional = false
+python-versions = ">=3.9"
+groups = ["api"]
+files = [
+    {file = "prometheus_client-0.26.0-py3-none-any.whl", hash = "sha256:fa93d06737aa02bacd05794768508bb97d2fbee28cb3bca04eaae92f0ca953d6"},
+    {file = "prometheus_client-0.26.0.tar.gz", hash = "sha256:04a91bcf94e2cf74a44a1a874d651a2e853ed354b6e822f3b7487751465d5c2b"},
+]
+
+[package.extras]
+aiohttp = ["aiohttp"]
+django = ["django"]
+twisted = ["twisted"]
+
+[[package]]
 name = "pydantic"
 version = "2.14.2"
 description = "Data validation using Python type hints"
@@ -2319,4 +2336,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.13"
-content-hash = "27da98a1edcc68b544cd6a6ff92c20e805c9cefc36ba6835b9abf479328ef380"
+content-hash = "3f35e297b943e8200d927a3b4d92c7a2c1468368e0b3cc60816bc1a7dff548e8"
