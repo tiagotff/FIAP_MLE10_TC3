@@ -842,12 +842,13 @@ poetry run pre-commit install    # hooks executados a cada commit
 
 ## Etapas do projeto
 
-| Etapa | Entregáveis |
-|---|---|
-| 1. Decisão arquitetural e API inicial | Decisão de deploy (esta documentação), API FastAPI em Docker, latência baseline |
-| 2. CI/CD e pipeline de treino | [Workflow GitHub Actions](#cicd-github-actions) (lint → testes → DAG → builds → GHCR) e [DAG Airflow](#pipeline-de-retreino-airflow) de retreino com quality gate |
-| 3. Monitoramento | [Métricas `prometheus_client`](#monitoramento-prometheus--grafana) (latência p99, erros, predições, drift), Docker Compose (API + Prometheus + Grafana), dashboard de 17 painéis, alertas testados com `promtool` e gerador de tráfego |
-| 4. Otimização de latência | Modelo exportado para ONNX Runtime e comparação de latência |
+| Etapa | Status | Entregáveis |
+|---|---|---|
+| 1. Decisão arquitetural e API inicial | ✅ Concluída | Decisão de deploy (esta documentação), API FastAPI em Docker, latência baseline |
+| 2. CI/CD e pipeline de treino | ✅ Concluída | [Workflow GitHub Actions](#cicd-github-actions) (lint → testes → DAG → builds → GHCR) e [DAG Airflow](#pipeline-de-retreino-airflow) de retreino com quality gate |
+| 3. Monitoramento | ✅ Concluída | [Métricas `prometheus_client`](#monitoramento-prometheus--grafana) (latência p99, erros, predições, drift), Docker Compose (API + Prometheus + Grafana), dashboard de 17 painéis, alertas testados com `promtool` e gerador de tráfego |
+| 4. Otimização de latência | ⏳ Em andamento | Modelo exportado para ONNX Runtime e comparação de latência p99 |
+| Vídeo (STAR) | ⏳ Pendente | Apresentação de até 5 minutos: situação, tarefa, ação e resultado |
 
 ## Licença e atribuição
 
