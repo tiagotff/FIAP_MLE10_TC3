@@ -3,7 +3,8 @@
 import time
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from prometheus_client import CONTENT_TYPE_LATEST
 
 from triage.api.schemas import (
     BatchRequest,
@@ -16,7 +17,8 @@ from triage.api.schemas import (
     PredictionResponse,
     ReadinessResponse,
 )
-from triage.inference.predictor import Prediction, UrgencyPredictor
+from triage.inference.predictor import CoverageAware, Prediction, UrgencyPredictor
+from triage.monitoring.metrics import ApiMetrics
 
 router = APIRouter()
 
@@ -39,7 +41,13 @@ def get_predictor(request: Request) -> UrgencyPredictor:
     return predictor
 
 
+def get_metrics(request: Request) -> ApiMetrics:
+    """Recupera os coletores de métricas criados com a aplicação."""
+    return request.app.state.metrics
+
+
 PredictorDep = Annotated[UrgencyPredictor, Depends(get_predictor)]
+MetricsDep = Annotated[ApiMetrics, Depends(get_metrics)]
 
 
 def timed_predict(
@@ -49,6 +57,29 @@ def timed_predict(
     start = time.perf_counter()
     predictions = predictor.predict(texts)
     return predictions, round((time.perf_counter() - start) * 1000, 3)
+
+
+def monitored_predict(
+    predictor: UrgencyPredictor,
+    metrics: ApiMetrics,
+    texts: list[str],
+    endpoint: str,
+) -> tuple[list[Prediction], float]:
+    """Predição com registro de tempo, rótulos e sinais de drift.
+
+    A cobertura de vocabulário é calculada fora do tempo de inferência
+    reportado e só quando o backend oferece essa capacidade.
+    """
+    predictions, elapsed_ms = timed_predict(predictor, texts)
+    metrics.observe_inference(endpoint, elapsed_ms / 1000, len(texts))
+    metrics.observe_predictions(predictions)
+    coverages = (
+        predictor.vocabulary_coverage(texts)
+        if isinstance(predictor, CoverageAware)
+        else None
+    )
+    metrics.observe_inputs(texts, coverages)
+    return predictions, elapsed_ms
 
 
 def to_item(prediction: Prediction) -> PredictionItem:
@@ -100,15 +131,25 @@ def model_info(predictor: PredictorDep) -> ModelInfoResponse:
     )
 
 
+@router.get("/metrics", include_in_schema=False)
+def metrics_endpoint(metrics: MetricsDep) -> Response:
+    """Métricas no formato de exposição do Prometheus."""
+    return Response(content=metrics.render(), media_type=CONTENT_TYPE_LATEST)
+
+
 @router.post(
     "/predict",
     response_model=PredictionResponse,
     responses=_UNAVAILABLE,
     tags=["triagem"],
 )
-def predict(payload: LaudoRequest, predictor: PredictorDep) -> PredictionResponse:
+def predict(
+    payload: LaudoRequest, predictor: PredictorDep, metrics: MetricsDep
+) -> PredictionResponse:
     """Classifica a urgência de um laudo (normal / atencao / urgente)."""
-    [prediction], elapsed_ms = timed_predict(predictor, [payload.text])
+    [prediction], elapsed_ms = monitored_predict(
+        predictor, metrics, [payload.text], "predict"
+    )
     return PredictionResponse(
         **to_item(prediction).model_dump(),
         model_version=predictor.model_version,
@@ -122,9 +163,13 @@ def predict(payload: LaudoRequest, predictor: PredictorDep) -> PredictionRespons
     responses=_UNAVAILABLE,
     tags=["triagem"],
 )
-def predict_batch(payload: BatchRequest, predictor: PredictorDep) -> BatchResponse:
+def predict_batch(
+    payload: BatchRequest, predictor: PredictorDep, metrics: MetricsDep
+) -> BatchResponse:
     """Classifica um lote de laudos, preservando a ordem de entrada."""
-    predictions, elapsed_ms = timed_predict(predictor, payload.texts)
+    predictions, elapsed_ms = monitored_predict(
+        predictor, metrics, payload.texts, "predict_batch"
+    )
     return BatchResponse(
         predictions=[to_item(p) for p in predictions],
         model_version=predictor.model_version,

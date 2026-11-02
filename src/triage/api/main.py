@@ -22,6 +22,7 @@ from triage.api.routes import router
 from triage.config.settings import get_settings
 from triage.inference.loader import load_predictor
 from triage.inference.predictor import UrgencyPredictor
+from triage.monitoring.metrics import ApiMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -36,24 +37,28 @@ def default_predictor_factory() -> UrgencyPredictor:
 
 def create_app(
     predictor_factory: PredictorFactory = default_predictor_factory,
+    metrics: ApiMetrics | None = None,
 ) -> FastAPI:
-    """Cria a aplicação; o preditor é injetável para facilitar testes."""
+    """Cria a aplicação; preditor e métricas são injetáveis para testes."""
+    settings = get_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.predictor = predictor_factory()
         version = getattr(app.state.predictor, "model_version", "nenhum")
+        app.state.metrics.set_model(version, settings.inference_backend)
         logger.info("Modelo carregado: %s", version)
         yield
         app.state.predictor = None
 
-    configure_logging(get_settings().log_level)
+    configure_logging(settings.log_level)
     app = FastAPI(
         title="Triagem de Laudos Médicos",
         description="Classifica a urgência de laudos em normal, atencao ou urgente.",
         version=__version__,
         lifespan=lifespan,
     )
+    app.state.metrics = metrics or ApiMetrics.create()
     app.middleware("http")(request_context)
     register_error_handlers(app)
     app.include_router(router)
