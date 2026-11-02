@@ -51,6 +51,9 @@ poetry run python -m triage.data.download
 # 6. Treinar: deduplicação, divisão 70/15/15, limiar calibrado e avaliação no teste
 poetry run python -m triage.training.train
 
+# 6b. Exportar para ONNX (verifica a paridade com o modelo original)
+poetry run python -m triage.optimization.export_onnx
+
 # 7. Subir a API — deixe este terminal aberto e rodando
 poetry run uvicorn triage.api.main:app --port 8000
 ```
@@ -81,7 +84,14 @@ curl -X POST http://localhost:8000/predict/batch \
 
 # 5. Medir a latência (1.000 requisições)
 poetry run python scripts/benchmark_api.py --requests 1000 --warmup 100
+
+# 6. Comparar a latência do modelo original (scikit-learn) com o ONNX
+poetry run python -m triage.benchmark.compare
 ```
+
+A API local usa o backend definido em `INFERENCE_BACKEND` no `.env` (`sklearn` por
+padrão). Para servir o modelo ONNX, troque para `onnx` ou suba com
+`INFERENCE_BACKEND=onnx poetry run uvicorn triage.api.main:app --port 8000`.
 
 Para encerrar, volte ao Terminal 1 e aperte `Ctrl+C`.
 
@@ -90,8 +100,9 @@ com o Optuna (~2 min) e regrava `configs/model.yaml`.
 
 ### Opção B — Somente Docker
 
-A imagem baixa os dados e treina o modelo durante o build, então não é preciso Python
-nem Poetry na máquina:
+A imagem baixa os dados, treina o modelo e o exporta para ONNX durante o build, então não
+é preciso Python nem Poetry na máquina. O container serve o modelo **ONNX** por padrão
+(`-e INFERENCE_BACKEND=sklearn` serve o original):
 
 ```bash
 # 1. Clonar e entrar na pasta
@@ -187,6 +198,7 @@ Detalhes em [Monitoramento (Prometheus + Grafana)](#monitoramento-prometheus--gr
 - [CI/CD (GitHub Actions)](#cicd-github-actions)
 - [Pipeline de retreino (Airflow)](#pipeline-de-retreino-airflow)
 - [Monitoramento (Prometheus + Grafana)](#monitoramento-prometheus--grafana)
+- [Otimização de latência (ONNX Runtime)](#otimização-de-latência-onnx-runtime)
 - [Estrutura do repositório](#estrutura-do-repositório)
 - [Como executar](#como-executar)
 - [API](#api)
@@ -422,7 +434,9 @@ fica em [`reports/model/metrics.json`](reports/model/metrics.json).
 
 Medida com [`scripts/benchmark_api.py`](scripts/benchmark_api.py): 1.000 requisições
 sequenciais a `POST /predict` com laudos reais, após 100 requisições de aquecimento, com
-o servidor uvicorn em 1 worker.
+o servidor uvicorn em 1 worker e o modelo original (scikit-learn). A comparação com o
+modelo otimizado está em
+[Otimização de latência (ONNX Runtime)](#otimização-de-latência-onnx-runtime).
 
 **Métrica de referência: p99.** A latência é avaliada pelo percentil 99 — o tempo que
 cobre 99 de cada 100 laudos —, e não pela média ou pela mediana. Em uma fila de triagem,
@@ -479,7 +493,7 @@ flowchart LR
 | `lint` | Código sem erros de lint e formatado (`ruff check` e `ruff format --check`) |
 | `test` | Suíte completa de testes com cobertura, em Python 3.11 e 3.12; o relatório `coverage.xml` fica como artefato da execução |
 | `dag` | A DAG é importada sem erros e mantém as tasks e a ordem esperadas (`airflow/tests`) |
-| `docker-api` | A imagem da API é construída (treinando o modelo), sobe, responde em `/ready` e classifica um laudo de infarto como `urgente` |
+| `docker-api` | A imagem da API é construída (treinando e exportando o modelo para ONNX), sobe, responde em `/ready`, classifica um laudo de infarto como `urgente` e dá os mesmos rótulos com os backends ONNX e scikit-learn |
 | `docker-airflow` | A imagem do Airflow é construída, o venv de ML importa o projeto e a DAG é carregada dentro da imagem |
 | `monitoring` | Configuração e regras do Prometheus válidas e com testes unitários aprovados (`promtool`); a stack do Docker Compose sobe, recebe tráfego e passa no [smoke test de monitoramento](#verificação-automatizada) |
 | `publish` | Em push na `main`, publica a imagem da API em `ghcr.io/tiagotff/triage-api` com as tags `latest` e o SHA do commit |
@@ -500,7 +514,8 @@ flowchart LR
     DL[download_data] --> P[prepare_data]
     P --> C[calibrate_threshold]
     C --> TR[train_model]
-    TR --> E[evaluate_model]
+    TR --> O[export_onnx<br/>paridade com o original]
+    O --> E[evaluate_model]
     E --> G{quality_gate}
     G -->|aprovado| PUB[publish_model]
     G -.->|reprovado| X[modelo atual mantido]
@@ -512,9 +527,10 @@ flowchart LR
 | `prepare_data` | Deduplica e divide em treino/validação/teste (70/15/15) |
 | `calibrate_threshold` | Calibra o limiar de `urgente` com validação cruzada em treino + validação |
 | `train_model` | Treina o modelo final em treino + validação |
+| `export_onnx` | Exporta para ONNX e falha se o modelo exportado não reproduzir o original em todo o corpus ([detalhes](#otimização-de-latência-onnx-runtime)) |
 | `evaluate_model` | Avalia no teste, com argmax e com a política de limiar |
 | `quality_gate` | Falha a execução se F1 macro < 0,74 ou recall de `urgente` < 0,80 no teste |
-| `publish_model` | Arquiva a versão em `models/archive/<versão>/` e troca o modelo em uso de forma atômica |
+| `publish_model` | Arquiva a versão em `models/archive/<versão>/` e troca os modelos em uso (`model.joblib` e `model.onnx`) de forma atômica |
 
 **Decisões de projeto:**
 
@@ -541,8 +557,9 @@ poetry run python -m triage.pipeline.run
 ```
 
 A DAG foi validada com `airflow dags test` e pelo scheduler do Airflow 3.3.2 (execuções
-agendada e manual): as 8 tasks concluem com sucesso e o modelo publicado tem as mesmas
-métricas do treino manual (F1 macro 0,776; recall de `urgente` 0,847).
+agendada e manual): as tasks concluem com sucesso e o modelo publicado tem as mesmas
+métricas do treino manual (F1 macro 0,776; recall de `urgente` 0,847). Com a Etapa 4, a
+DAG passou a ter 9 tasks, incluindo a exportação para ONNX, validada da mesma forma.
 
 ## Monitoramento (Prometheus + Grafana)
 
@@ -670,6 +687,92 @@ erro, recording rules com dados e, no Grafana, datasource saudável, dashboard p
 e **todas as consultas dos painéis executando sem erro**. O CI roda essa verificação a cada
 push, depois de subir a stack com Docker Compose e gerar tráfego (job `monitoring`).
 
+## Otimização de latência (ONNX Runtime)
+
+**Técnica:** conversão do pipeline TF-IDF + Regressão Logística para **ONNX**, executado
+com o **ONNX Runtime** ([`export_onnx.py`](src/triage/optimization/export_onnx.py) e
+[`onnx_predictor.py`](src/triage/inference/onnx_predictor.py)). O modelo é o mesmo: só
+muda o motor de execução, que roda em C++ e libera o GIL do Python durante a inferência.
+
+```bash
+poetry run python -m triage.optimization.export_onnx   # gera models/model.onnx
+INFERENCE_BACKEND=onnx poetry run uvicorn triage.api.main:app --port 8000
+```
+
+### Conversão exata e portátil
+
+| Decisão | Por quê |
+|---|---|
+| `lowercase` feito em Python, fora do grafo | O operador `StringNormalizer` do ONNX depende dos *locales* do sistema e falha em imagens Docker enxutas (`en_US.UTF-8` ausente). O `str.lower()` do Python é exatamente o que o scikit-learn usa, então o modelo fica portátil (Linux, Windows, Docker) sem perder paridade |
+| Tokenizador com `[\p{L}\p{N}_]{2,}` | Equivalente RE2 do `token_pattern` do scikit-learn. O padrão do conversor só aceita ASCII e quebraria "torácica" em dois tokens |
+| Espaço do Optuna restrito a opções conversíveis | Unigramas e analisador de palavras ([`tuning.yaml`](configs/tuning.yaml)); a exportação valida isso e falha com erro claro para opções sem conversão exata |
+| Perfil de texto nos metadados do `.onnx` | Ordem das classes, stop words e vocabulário ficam no próprio arquivo: o backend ONNX mede a **cobertura de vocabulário** (sinal de drift do monitoramento) sem carregar o modelo scikit-learn |
+| Sessão com 1 thread | Um laudo por chamada não ganha com paralelismo dentro do operador; uma thread evita disputa de CPU entre requisições simultâneas e protege o p99 |
+
+**Paridade verificada antes de gravar o arquivo**, em todo o corpus (14.438
+textos): **100% dos rótulos iguais** e diferença máxima de probabilidade de 1,9·10⁻⁷. Se a
+paridade falhar, o `.onnx` não é gravado — na DAG, a task `export_onnx` falha e nada é
+publicado. Os dois backends usam os mesmos metadados e o mesmo limiar de decisão.
+
+### Resultados: modelo isolado
+
+[`python -m triage.benchmark.compare`](src/triage/benchmark/compare.py) mede os dois
+backends pelo mesmo caminho da API (`load_predictor` + `predict`, com o limiar de
+decisão), com 2.000 laudos do corpus, alternando os backends em rodadas
+(Linux, Python 3.12, 2 vCPUs):
+
+| Backend | Unitário — **p99** (p50) | Lote de 32 — **p99** (p50) | Carga do modelo | Artefato |
+|---|---|---|---|---|
+| scikit-learn | 2,483 ms (1,031 ms) | 7,49 ms (5,05 ms) | 254 ms | 1,00 MB |
+| **ONNX Runtime** | **0,717 ms** (0,258 ms) | 9,06 ms (6,75 ms) | **22 ms** | 1,52 MB |
+
+**No caso de uso real — um laudo por requisição — o ONNX reduz o p99 em
+3,5x** (4,0x no p50) e carrega o modelo
+11x mais rápido. Em lotes, o ONNX fica
+~17% mais lento no p99: o operador `TfIdfVectorizer`
+do ONNX produz uma matriz **densa** (lote × 30 mil termos), enquanto o scikit-learn usa
+matriz esparsa. Como a [arquitetura escolhida](#real-time-ou-batch) é de inferência em
+tempo real, laudo a laudo, o ONNX é o backend padrão.
+
+### Resultados: API ponta a ponta
+
+[`scripts/benchmark_api.py`](scripts/benchmark_api.py) contra o uvicorn local (1 worker),
+1.000 requisições sequenciais e 2.000 com 8 clientes simultâneos (`--concurrency 8`):
+
+| Carga | Medida | scikit-learn — p99 (p50) | **ONNX — p99 (p50)** | Variação no p99 |
+|---|---|---|---|---|
+| 1 cliente (sequencial) | Inferência do modelo | 2,73 ms (1,47) | **1,19 ms** (0,49) | −57% |
+| 1 cliente (sequencial) | Ponta a ponta | 9,70 ms (5,59) | **9,60 ms** (4,02) | −1% |
+| 1 cliente (sequencial) | Vazão | 174 req/s | **230 req/s** | +33% |
+| 8 clientes simultâneos | Inferência do modelo | 16,49 ms (4,20) | **6,78 ms** (1,18) | −59% |
+| 8 clientes simultâneos | Ponta a ponta | 65,10 ms (34,47) | **51,51 ms** (23,85) | −21% |
+| 8 clientes simultâneos | Vazão | 223 req/s | **322 req/s** | +44% |
+
+Sem concorrência, o ganho de ~1,5 ms do modelo fica diluído no custo de HTTP,
+serialização e log de cada requisição. **Sob carga, o ONNX reduz o p99 do modelo em
+~59% e o ponta a ponta em ~21%, com ~44% mais vazão**: como o
+ONNX Runtime libera o GIL, as requisições simultâneas deixam de disputar o interpretador
+Python. Relatórios completos em [`reports/latency/`](reports/latency/).
+
+### E a quantização?
+
+Foi avaliada e **não se aplica** a este modelo. A quantização dinâmica do ONNX Runtime
+(`quantize_dynamic`) converte operadores `MatMul`/`Gemm` para INT8, mas o grafo exportado
+não tem nenhum: são `Tokenizer`, `TfIdfVectorizer`, `Normalizer` e `LinearClassifier`. O
+modelo quantizado sai idêntico ao original (mesmos operadores, mesmo tamanho). Com 1,5
+MB e inferência abaixo de 1 ms, o gargalo não é aritmética de ponto flutuante, e sim
+tokenização e alocação — justamente o que a execução em C++ do ONNX Runtime ataca.
+
+### Onde o ONNX entra no projeto
+
+- **Docker:** o build treina e exporta (com paridade), e a imagem sobe com
+  `INFERENCE_BACKEND=onnx`; `-e INFERENCE_BACKEND=sklearn` serve o modelo original.
+- **Airflow:** a DAG ganhou a task `export_onnx` entre o treino e a avaliação, e a
+  publicação troca `model.joblib`, `model.onnx` e os metadados juntos.
+- **CI:** o job `docker-api` sobe a imagem com os dois backends e exige rótulos iguais.
+- **Monitoramento:** o painel **Modelo em uso** mostra o backend (`· onnx`), e
+  `GET /model` informa o backend em uso.
+
 ## Estrutura do repositório
 
 ```
@@ -688,7 +791,7 @@ push, depois de subir a stack com Docker Compose e gerar tráfego (job `monitori
 │   ├── training.yaml          # divisão 70/15/15, calibração, decisão e quality gate
 │   └── tuning.yaml            # espaço de busca e orçamento do Optuna
 ├── reports/
-│   ├── latency/               # benchmarks de latência
+│   ├── latency/               # benchmarks de latência (baseline e sklearn x ONNX)
 │   ├── model/                 # dados, decisão e métricas (validação cruzada e teste)
 │   └── tuning/                # histórico de trials e resumo da busca
 ├── scripts/
@@ -697,12 +800,13 @@ push, depois de subir a stack com Docker Compose e gerar tráfego (job `monitori
 │   └── smoke_monitoring.py    # verificação de ponta a ponta da stack de monitoramento
 ├── src/triage/
 │   ├── api/                   # FastAPI: app, rotas, schemas, middleware, erros, logging
-│   ├── benchmark/             # estatísticas de latência (p99 como referência)
+│   ├── benchmark/             # estatísticas de latência (p99) e comparação de backends
 │   ├── config/                # Settings (pydantic-settings) e leitura de YAML
 │   ├── data/                  # download, deduplicação e divisão estratificada
-│   ├── inference/             # preditores e políticas de decisão (Strategy + Factory)
+│   ├── inference/             # backends sklearn e ONNX, políticas de decisão (Strategy + Factory)
 │   ├── models/                # Factory de pipelines TF-IDF + classificador
 │   ├── monitoring/            # métricas Prometheus da API
+│   ├── optimization/          # exportação para ONNX com verificação de paridade
 │   ├── pipeline/              # etapas do retreino, quality gate e execução sem Airflow
 │   └── training/              # Optuna, calibração OOF, treino, avaliação e artefatos
 ├── tests/                     # testes unitários e de API (pytest)
@@ -731,6 +835,7 @@ cp .env.example .env
 poetry run python -m triage.data.download      # baixa e valida o corpus
 poetry run python -m triage.training.tune      # (opcional) refaz a busca do Optuna
 poetry run python -m triage.training.train     # calibra o limiar, treina e avalia
+poetry run python -m triage.optimization.export_onnx  # exporta para ONNX (paridade)
 poetry run python -m triage.pipeline.run       # (alternativa) pipeline com quality gate
 poetry run uvicorn triage.api.main:app --port 8000
 ```
@@ -765,7 +870,7 @@ Poetry, pandas, Optuna, dados de treino nem dependências de desenvolvimento.
 |---|---|---|
 | `GET` | `/health` | *Liveness*: o processo responde (inclui se o modelo está carregado) |
 | `GET` | `/ready` | *Readiness*: `200` somente com o modelo carregado; `503` caso contrário |
-| `GET` | `/model` | Versão, classificador, regra de decisão (limiar) e métricas de teste |
+| `GET` | `/model` | Versão, backend (`onnx` ou `sklearn`), classificador, regra de decisão (limiar) e métricas de teste |
 | `POST` | `/predict` | Classifica a urgência de um laudo |
 | `POST` | `/predict/batch` | Classifica até 64 laudos em uma chamada, preservando a ordem |
 | `GET` | `/metrics` | Métricas no formato Prometheus (ver [Monitoramento](#monitoramento-prometheus--grafana)) |
@@ -814,8 +919,8 @@ classe tenha probabilidade maior.
   - *Aberto/fechado:* classificadores, backends de inferência e políticas de decisão
     entram por registro (Factory), sem alterar quem os usa.
   - *Inversão de dependência:* a API depende do protocolo `UrgencyPredictor`, e o
-    preditor recebe a `DecisionPolicy` por injeção. Trocar scikit-learn por ONNX Runtime,
-    ou argmax por limiar, não toca nos endpoints.
+    preditor recebe a `DecisionPolicy` por injeção. O backend ONNX entrou na Etapa 4 só
+    com uma nova classe e uma entrada no registro de backends: nenhum endpoint mudou.
   - *Segregação de interfaces:* a cobertura de vocabulário é uma capacidade opcional
     (`CoverageAware`), separada do contrato de predição: um backend sem vocabulário
     exposto continua válido, apenas sem esse sinal de drift.
@@ -847,7 +952,7 @@ poetry run pre-commit install    # hooks executados a cada commit
 | 1. Decisão arquitetural e API inicial | ✅ Concluída | Decisão de deploy (esta documentação), API FastAPI em Docker, latência baseline |
 | 2. CI/CD e pipeline de treino | ✅ Concluída | [Workflow GitHub Actions](#cicd-github-actions) (lint → testes → DAG → builds → GHCR) e [DAG Airflow](#pipeline-de-retreino-airflow) de retreino com quality gate |
 | 3. Monitoramento | ✅ Concluída | [Métricas `prometheus_client`](#monitoramento-prometheus--grafana) (latência p99, erros, predições, drift), Docker Compose (API + Prometheus + Grafana), dashboard de 17 painéis, alertas testados com `promtool` e gerador de tráfego |
-| 4. Otimização de latência | ⏳ Em andamento | Modelo exportado para ONNX Runtime e comparação de latência p99 |
+| 4. Otimização de latência | ✅ Concluída | [Modelo exportado para ONNX Runtime](#otimização-de-latência-onnx-runtime) com paridade de 100%, backend selecionável na API, exportação na DAG e comparação de latência p99 (modelo isolado e API sob carga) |
 | Vídeo (STAR) | ⏳ Pendente | Apresentação de até 5 minutos: situação, tarefa, ação e resultado |
 
 ## Licença e atribuição

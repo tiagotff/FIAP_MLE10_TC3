@@ -3,7 +3,7 @@
 **Versão do modelo:** `20261101T221821Z` (registrada em `models/metadata.json` e em
 [`reports/model/metrics.json`](reports/model/metrics.json))
 **Data:** Novembro de 2026
-**Framework:** scikit-learn 1.7
+**Framework:** scikit-learn 1.7 (treino) · ONNX Runtime 1.31 (inferência em produção)
 **Tipo:** Classificação de texto em 3 classes — TF-IDF + Regressão Logística, com regra
 de decisão por limiar para a classe crítica
 **Repositório:** [github.com/tiagotff/FIAP_MLE10_TC3](https://github.com/tiagotff/FIAP_MLE10_TC3)
@@ -14,7 +14,8 @@ de decisão por limiar para a classe crítica
 Classificador leve que atribui a um texto clínico um nível de urgência — `normal`,
 `atencao` ou `urgente` — para **reordenar a fila de leitura de laudos**, de modo que a
 equipe clínica veja primeiro os casos que não podem esperar. É servido por uma API REST
-(FastAPI) em container Docker, com latência de inferência de ~1 ms em CPU.
+(FastAPI) em container Docker; em produção, o modelo roda exportado para ONNX Runtime,
+com inferência de ~0,3 ms (p50) e 0,7 ms (p99) por laudo em CPU.
 
 ## Detalhes do modelo
 
@@ -26,8 +27,8 @@ equipe clínica veja primeiro os casos que não podem esperar. É servido por um
 | Seleção de hiperparâmetros | Optuna (TPE, 100 trials, seed 42), maximizando F1 macro na validação |
 | Calibração do limiar | Probabilidades out-of-fold (validação cruzada estratificada de 5 folds em treino + validação), meta de recall ≥ 0,85 para `urgente` |
 | Treino final | Treino + validação (85% do corpus deduplicado) |
-| Tamanho do artefato | ~1 MB (`joblib`) |
-| Compatibilidade ONNX | Conversão verificada: 100% de concordância de rótulos e diferença máxima de probabilidade de ~2·10⁻⁷ |
+| Tamanho do artefato | ~1,0 MB (`joblib`) · ~1,5 MB (`onnx`) |
+| Exportação ONNX | Feita a cada treino (CLI, Docker e DAG), com paridade verificada em todo o corpus: 100% de concordância de rótulos e diferença máxima de probabilidade de ~2·10⁻⁷ |
 | Seed | 42 (divisão, validação cruzada, Optuna e modelo) |
 
 ## Uso pretendido
@@ -103,12 +104,21 @@ indica que a calibração do limiar generaliza.
 ### Desempenho computacional
 
 Latência medida pelo **p99** (o tempo que cobre 99 de cada 100 requisições), a métrica de
-referência do projeto; o p50 aparece como contexto.
+referência do projeto; o p50 aparece entre parênteses.
 
-| Ambiente | Inferência do modelo — **p99** (p50) | Ponta a ponta — **p99** (p50) |
+| Medida (Linux, Python 3.12) | scikit-learn | **ONNX Runtime** |
 |---|---|---|
-| Local, uvicorn 1 worker | **2,02 ms** (1,13 ms) | **6,79 ms** (3,42 ms) |
-| Docker Desktop (Windows) | **3,43 ms** (1,01 ms) | **31,08 ms** (15,99 ms) |
+| Modelo isolado, 1 laudo por chamada | 2,48 ms (1,03 ms) | **0,72 ms (0,26 ms)** — 3,5x |
+| Modelo isolado, lote de 32 laudos | 7,49 ms (5,05 ms) | 9,06 ms (6,75 ms) |
+| API, inferência sob 8 clientes simultâneos | 16,49 ms (4,20 ms) | **6,78 ms (1,18 ms)** |
+| API, ponta a ponta sob 8 clientes simultâneos | 65,10 ms (34,47 ms) | **51,51 ms (23,85 ms)** |
+| Carga do modelo | 254 ms | **22 ms** |
+
+Baseline no Docker Desktop (Windows), com scikit-learn: inferência 3,43 ms e ponta a
+ponta 31,08 ms no p99; a diferença vem da camada de rede do Docker Desktop. Os dois
+backends dão os mesmos rótulos; o ONNX é o padrão por ser mais rápido no padrão de uso
+real (um laudo por requisição). Detalhes no
+[README](README.md#otimização-de-latência-onnx-runtime).
 
 ## Regra de decisão e trade-off
 
@@ -203,12 +213,14 @@ poetry install
 poetry run python -m triage.data.download     # commit e SHA-256 fixados
 poetry run python -m triage.training.tune     # opcional: refaz a busca do Optuna
 poetry run python -m triage.training.train    # gera models/ e reports/model/metrics.json
+poetry run python -m triage.optimization.export_onnx  # models/model.onnx, com paridade
 poetry run python -m triage.pipeline.run      # alternativa: pipeline com quality gate
 ```
 
 Em produção, o retreino é orquestrado pela DAG `triage_retraining` do Airflow, que só
-publica um novo modelo se ele passar no quality gate (F1 macro ≥ 0,74 e recall de
-`urgente` ≥ 0,80 no teste) e mantém cada versão publicada em `models/archive/`.
+publica um novo modelo se a exportação ONNX reproduzir o original e se ele passar no
+quality gate (F1 macro ≥ 0,74 e recall de `urgente` ≥ 0,80 no teste), e mantém cada
+versão publicada (joblib e ONNX) em `models/archive/`.
 
 Configurações: [`configs/data.yaml`](configs/data.yaml),
 [`configs/model.yaml`](configs/model.yaml), [`configs/training.yaml`](configs/training.yaml)
