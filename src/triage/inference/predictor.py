@@ -6,10 +6,10 @@ inicialização, sem alterar os endpoints. A regra de decisão
 (`DecisionPolicy`) é injetada, e não embutida no backend.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Container, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import joblib
 import numpy as np
@@ -36,6 +36,26 @@ class UrgencyPredictor(Protocol):
     def predict(self, texts: list[str]) -> list[Prediction]:
         """Classifica uma lista de textos."""
         ...
+
+
+@runtime_checkable
+class CoverageAware(Protocol):
+    """Capacidade opcional: medir quanto do texto o modelo reconhece.
+
+    Separada de `UrgencyPredictor` (segregação de interfaces): um backend
+    que não exponha o vocabulário continua válido, apenas sem esse sinal.
+    """
+
+    def vocabulary_coverage(self, texts: list[str]) -> list[float]:
+        """Fração dos termos de cada texto presentes no vocabulário (0 a 1)."""
+        ...
+
+
+def token_coverage(tokens: Sequence[str], vocabulary: Container[str]) -> float:
+    """Fração de `tokens` presentes em `vocabulary` (0.0 se não houver tokens)."""
+    if not tokens:
+        return 0.0
+    return sum(token in vocabulary for token in tokens) / len(tokens)
 
 
 def column_order(classes: Sequence[str], labels: Sequence[str]) -> list[int]:
@@ -82,6 +102,7 @@ class SklearnPredictor:
         self._order = column_order(classes, self._labels)
         self._pipeline = pipeline
         self._policy = policy or ArgmaxPolicy()
+        self._analyzer, self._vocabulary = _text_vocabulary(pipeline)
 
     @classmethod
     def from_path(
@@ -107,3 +128,28 @@ class SklearnPredictor:
         probas = self._pipeline.predict_proba(texts)[:, self._order]
         chosen = self._policy.decide(probas, self._labels)
         return to_predictions(probas, self._labels, chosen)
+
+    def vocabulary_coverage(self, texts: list[str]) -> list[float]:
+        """Fração dos termos de cada texto que o TF-IDF reconhece.
+
+        Usa o mesmo analisador do treino (minúsculas, tokenização e stop
+        words). Valores baixos indicam texto fora do domínio — por exemplo,
+        laudos em português —, um sinal de drift observável sem rótulos.
+        """
+        return [
+            token_coverage(self._analyzer(text), self._vocabulary) for text in texts
+        ]
+
+
+def _text_vocabulary(
+    pipeline: Pipeline,
+) -> tuple[Callable[[str], list[str]], Container[str]]:
+    """Analisador e vocabulário do vetorizador (primeira etapa do pipeline).
+
+    Raises:
+        ValueError: Se a primeira etapa não for um vetorizador de texto ajustado.
+    """
+    vectorizer = pipeline.steps[0][1]
+    if not hasattr(vectorizer, "vocabulary_"):
+        raise ValueError("A primeira etapa do pipeline não é um vetorizador ajustado.")
+    return vectorizer.build_analyzer(), vectorizer.vocabulary_

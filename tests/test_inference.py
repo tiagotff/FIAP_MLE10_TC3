@@ -6,7 +6,12 @@ import pytest
 
 from triage.inference.loader import load_predictor
 from triage.inference.policy import ThresholdPolicy
-from triage.inference.predictor import SklearnPredictor, column_order, to_predictions
+from triage.inference.predictor import (
+    SklearnPredictor,
+    column_order,
+    to_predictions,
+    token_coverage,
+)
 
 LABELS = ["normal", "atencao", "urgente"]
 
@@ -75,3 +80,26 @@ def test_load_predictor_builds_policy_from_metadata(project_settings, trained_pi
 def test_load_predictor_unknown_backend(project_settings):
     with pytest.raises(ValueError, match="Backend 'tensorrt' desconhecido"):
         load_predictor(project_settings, backend="tensorrt")
+
+
+def test_token_coverage():
+    assert token_coverage(["a", "b", "c", "d"], {"a", "b"}) == 0.5
+    assert token_coverage([], {"a"}) == 0.0
+
+
+def test_vocabulary_coverage_drops_for_unknown_language(trained_pipeline):
+    predictor = SklearnPredictor(trained_pipeline)
+    english, portuguese, empty = predictor.vocabulary_coverage(
+        ["acute stroke with hemiparesis", "acidente vascular com fraqueza", "the of"]
+    )
+    assert english == 1.0
+    assert portuguese < 0.5
+    assert empty == 0.0  # só stop words: nada a reconhecer
+
+
+def test_predictor_requires_fitted_vectorizer(trained_pipeline):
+    from sklearn.pipeline import Pipeline
+
+    clf = trained_pipeline.named_steps["clf"]
+    with pytest.raises(ValueError, match="vetorizador ajustado"):
+        SklearnPredictor(Pipeline([("clf", clf)]))
