@@ -7,6 +7,8 @@ servido por uma API REST (FastAPI) empacotada em Docker. O projeto cobre o ciclo
 vida do modelo em produção: decisão arquitetural de deploy em nuvem, CI/CD, orquestração
 de retreino, monitoramento e otimização de latência.
 
+> 🎥 **Vídeo de apresentação (STAR, até 5 min):** [assistir no Google Drive](https://drive.google.com/file/d/1GXd1q_u_CsiTa6vCCkY2h_39JR3yi4uz/view?usp=sharing)
+>
 > 📄 Uso pretendido, métricas, limitações e considerações éticas do modelo estão
 > resumidos no [Model Card](MODEL_CARD.md).
 
