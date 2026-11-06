@@ -968,7 +968,7 @@ poetry run pre-commit install    # hooks executados a cada commit
 | 2. CI/CD e pipeline de treino | ✅ Concluída | [Workflow GitHub Actions](#cicd-github-actions) (lint → testes → DAG → builds → GHCR) e [DAG Airflow](#pipeline-de-retreino-airflow) de retreino com quality gate |
 | 3. Monitoramento | ✅ Concluída | [Métricas `prometheus_client`](#monitoramento-prometheus--grafana) (latência p99, erros, predições, drift), Docker Compose (API + Prometheus + Grafana), dashboard de 17 painéis, alertas testados com `promtool` e gerador de tráfego |
 | 4. Otimização de latência | ✅ Concluída | [Modelo exportado para ONNX Runtime](#otimização-de-latência-onnx-runtime) com paridade de 100%, backend selecionável na API, exportação na DAG e comparação de latência p99 (modelo isolado e API sob carga) |
-| Vídeo (STAR) | ⏳ Pendente | Apresentação de até 5 minutos: situação, tarefa, ação e resultado |
+| Vídeo (STAR) | ✅ Concluída | [Apresentação de até 5 minutos](https://drive.google.com/file/d/1GXd1q_u_CsiTa6vCCkY2h_39JR3yi4uz/view?usp=sharing): situação, tarefa, ação e resultado |
 
 ## Licença e atribuição
 
